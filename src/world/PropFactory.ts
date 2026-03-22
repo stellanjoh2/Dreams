@@ -32,7 +32,6 @@ export class PropFactory {
   private readonly monolithGeometry = new THREE.BoxGeometry(1, 1, 1, 6, 6, 6);
   private readonly cactusTrunkGeometry = new THREE.CylinderGeometry(0.55, 0.75, 6, 10);
   private readonly cactusArmGeometry = new THREE.CylinderGeometry(0.22, 0.35, 2.8, 8);
-  private readonly cloudPuffGeometry = new THREE.SphereGeometry(1, 24, 18);
   private readonly treeTrunkGeometry = new THREE.CylinderGeometry(0.24, 0.34, 2.2, 10);
   private readonly treeTopGeometry = new THREE.SphereGeometry(1.2, 28, 22);
   private readonly crystalGeometry = createCrystalGeometry();
@@ -79,27 +78,6 @@ export class PropFactory {
     group.add(rightArm);
 
     this.applyShadowFlags(group);
-    return group;
-  }
-
-  createCloud(color: string): THREE.Group {
-    const group = new THREE.Group();
-    const material = this.createCloudMaterial(color);
-
-    const puffs = [
-      { x: 0, y: 0, z: 0, r: 1.2 },
-      { x: 1.2, y: 0.2, z: 0.1, r: 0.95 },
-      { x: -1.25, y: 0.16, z: -0.05, r: 0.84 },
-      { x: 0.2, y: 0.65, z: 0.1, r: 0.72 },
-    ];
-
-    for (const puff of puffs) {
-      const mesh = new THREE.Mesh(this.cloudPuffGeometry, material);
-      mesh.position.set(puff.x, puff.y, puff.z);
-      mesh.scale.setScalar(puff.r);
-      group.add(mesh);
-    }
-
     return group;
   }
 
@@ -161,26 +139,6 @@ export class PropFactory {
       color: toColor(color),
       emissive: new THREE.Color(color).multiplyScalar(0.02),
       ...overrides,
-    });
-    this.materialCache.set(key, material);
-    return material;
-  }
-
-  private createCloudMaterial(color: string): THREE.MeshLambertMaterial {
-    const key = this.getMaterialKey('cloud', color, {
-      opacity: 1,
-      transparent: false,
-      emissiveLift: 0,
-    });
-    const cached = this.materialCache.get(key);
-    if (cached instanceof THREE.MeshLambertMaterial) {
-      return cached;
-    }
-
-    const material = new THREE.MeshLambertMaterial({
-      color: toColor(color),
-      transparent: false,
-      opacity: 1,
     });
     this.materialCache.set(key, material);
     return material;

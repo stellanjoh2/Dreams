@@ -7,6 +7,8 @@ import { AmbientDustSystem } from './AmbientDustSystem';
 import { FishSchoolsSystem } from './FishSchoolsSystem';
 import { FishingBoatProp } from './FishingBoatProp';
 import { CactusEnemySystem } from './CactusEnemySystem';
+import { createDistantWorldBackdrop } from './DistantWorldBackdrop';
+import { buildStylizedCloudRing, updateStylizedCloudRing, type OrbitalCloud } from './StylizedCloudRing';
 import { TerrainGenerator } from './TerrainGenerator';
 import { TerrainPhysics } from './TerrainPhysics';
 import {
@@ -60,7 +62,8 @@ export class WorldManager {
   private readonly terrainPhysics = new TerrainPhysics();
   private readonly cactusEnemies: CactusEnemySystem;
   private readonly plantLoader = new GLTFLoader();
-  private readonly driftingClouds: THREE.Object3D[] = [];
+  private orbitalClouds: OrbitalCloud[] = [];
+  private cloudRingGroup?: THREE.Group;
   private readonly sunAnchor = new THREE.Vector3(-32, 42, 84);
   private readonly sunTargetPosition = new THREE.Vector3(0, 4, -10);
 
@@ -111,13 +114,13 @@ export class WorldManager {
     this.buildSkyDome();
     this.buildLights(settings);
     this.buildSun();
+    this.worldRoot.add(createDistantWorldBackdrop());
     this.worldRoot.add(this.terrain.createGround());
     this.fishSchools.load();
     this.fishingBoat.load();
     this.cactusEnemies.load();
     this.worldRoot.add(this.plantScatterRoot);
     this.buildLandmarks();
-    this.buildClouds();
     this.worldRoot.add(this.ambientDust.mesh);
     this.ambientDust.applySettings(settings.particles);
 
@@ -129,14 +132,8 @@ export class WorldManager {
 
     this.syncDynamicPlatforms(elapsed);
 
-    for (const [index, cloud] of this.driftingClouds.entries()) {
-      cloud.position.x += delta * (0.18 + index * 0.015);
-      cloud.position.z += Math.sin(elapsed * 0.1 + index) * delta * 0.2;
-      cloud.position.y += Math.sin(elapsed * 0.25 + index * 1.2) * delta * 0.04;
-
-      if (cloud.position.x > 52) {
-        cloud.position.x = -52;
-      }
+    if (this.cloudRingGroup && this.orbitalClouds.length > 0) {
+      updateStylizedCloudRing(this.orbitalClouds, this.cloudRingGroup, delta, elapsed);
     }
 
     if (this.sunMesh) {
@@ -360,21 +357,21 @@ export class WorldManager {
     }
   }
 
-  private buildClouds(): void {
-    const cloudPositions = [
-      [-26, 19, -18],
-      [4, 18, -8],
-      [26, 21, 3],
-      [14, 16, 18],
-      [-8, 22, 14],
-    ] as const;
-
-    for (const [x, y, z] of cloudPositions) {
-      const cloud = this.props.createCloud('#fff1ff');
-      cloud.position.set(x, y, z);
-      cloud.scale.setScalar((1.3 + (x + z) * 0.005) * 2.2);
-      this.driftingClouds.push(cloud);
-      this.worldRoot.add(cloud);
+  /**
+   * Loads `public/assets/stylized_clouds_pack_vol_01.glb` and spawns a ring of clouds orbiting the playfield.
+   * Safe to call once after `build()`; no-op if the file is missing (warning in console).
+   */
+  async loadCloudPack(): Promise<void> {
+    if (this.cloudRingGroup) {
+      return;
+    }
+    try {
+      const { group, clouds } = await buildStylizedCloudRing(this.plantLoader);
+      this.cloudRingGroup = group;
+      this.orbitalClouds = clouds;
+      this.worldRoot.add(group);
+    } catch (err) {
+      console.warn('[WorldManager] Could not load stylized cloud pack:', err);
     }
   }
 

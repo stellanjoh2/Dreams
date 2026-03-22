@@ -1,3 +1,5 @@
+import type { Material } from 'three';
+
 declare module 'three/webgpu' {
   import type { WebGLRenderer } from 'three';
 
@@ -14,19 +16,38 @@ declare module 'three/webgpu' {
     render(): void;
     dispose(): void;
   }
+
+  /** Node material used when rendering `MeshBasicMaterial` on WebGPU. */
+  export class MeshBasicNodeMaterial extends Material {
+    fog: boolean;
+    colorNode: unknown;
+    constructor(parameters?: { fog?: boolean });
+  }
 }
 
 declare module 'three/tsl' {
+  export const abs: (v: any) => any;
+  export const attribute: (name: string, type?: string) => any;
+  export const color: (...args: any[]) => any;
+  export const float: (v: number) => any;
+  export const Fn: (fn: () => any) => any;
+  export const fract: (v: any) => any;
+  export const min: (...args: any[]) => any;
   export const mix: (...args: any[]) => any;
+  export const normalWorld: any;
+  export const positionLocal: any;
+  export const pow: (...args: any[]) => any;
   export const mrt: (...args: any[]) => any;
   export const normalView: any;
   export const output: any;
   export const pass: (...args: any[]) => any;
+  export const positionWorld: any;
   export const saturation: (...args: any[]) => any;
   export const smoothstep: (...args: any[]) => any;
   export const uniform: <T = any>(value: T) => { value: T };
   export const uv: (...args: any[]) => any;
   export const vec2: (...args: any[]) => any;
+  export const vec3: (...args: any[]) => any;
   export const vec4: (...args: any[]) => any;
 }
 
