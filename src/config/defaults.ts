@@ -9,7 +9,7 @@ export const WATER_SURFACE_Y = WORLD_FLOOR_Y + 0.055;
 
 export const DEFAULT_FX_SETTINGS: FxSettings = {
   exposure: 0.97,
-  contrast: 1.11,
+  contrast: 1.05,
   saturation: 1.56,
   vignette: 1.5,
   bloom: {
