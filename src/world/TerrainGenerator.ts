@@ -1,9 +1,13 @@
 import * as THREE from 'three';
-import { WaterMesh } from 'three/addons/objects/Water2Mesh.js';
-import { FOREGROUND_MOUNDS, PATH_PADS } from './TerrainLayout';
-import { WORLD_FLOOR_Y } from '../config/defaults';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { WaterSurfaceMesh } from './WaterSurfaceMesh.js';
+import { BLOCK_UNIT, JUMP_PADS, MOVING_ELEVATORS, PLATFORM_TILES, getMovingElevatorTopY } from './TerrainLayout';
+import { WATER_SURFACE_Y, WORLD_FLOOR_Y } from '../config/defaults';
+import { createMetallicFlakeOrmTexture } from '../materials/MetallicFlakeDetail';
 
 const WATER_RADIUS = 132;
+const TILE_RENDER_SCALE = BLOCK_UNIT * 1.02;
+const metallicFlakeDetail = createMetallicFlakeOrmTexture(6);
 
 const createWaterNormalTexture = (phase: number): THREE.DataTexture => {
   const size = 512;
@@ -43,13 +47,16 @@ const createWaterNormalTexture = (phase: number): THREE.DataTexture => {
 export class TerrainGenerator {
   private readonly seaBedGeometry = new THREE.CircleGeometry(148, 96);
   private readonly waterGeometry = new THREE.CircleGeometry(WATER_RADIUS, 192);
-  private readonly pathGeometry = new THREE.CylinderGeometry(0.4, 0.55, 1, 28);
-  private readonly moundGeometry = new THREE.SphereGeometry(1, 26, 18);
+  private readonly blockGeometry = new RoundedBoxGeometry(1, 1, 1, 4, 0.048);
   private readonly waterNormal0 = createWaterNormalTexture(0.12);
   private readonly waterNormal1 = createWaterNormalTexture(0.57);
+  private readonly blockMaterialCache = new Map<string, THREE.MeshPhysicalMaterial>();
+  private readonly elevatorMeshes = new Map<string, THREE.Mesh>();
+  private readonly instanceDummy = new THREE.Object3D();
 
   createGround(): THREE.Group {
     const group = new THREE.Group();
+    this.elevatorMeshes.clear();
 
     const seaBed = new THREE.Mesh(
       this.seaBedGeometry,
@@ -67,7 +74,7 @@ export class TerrainGenerator {
     seaBed.receiveShadow = true;
     group.add(seaBed);
 
-    const water = new WaterMesh(this.waterGeometry, {
+    const water = new WaterSurfaceMesh(this.waterGeometry, {
       color: '#4fd6da',
       flowDirection: new THREE.Vector2(0.35, 0.18),
       flowSpeed: 0.042,
@@ -76,50 +83,131 @@ export class TerrainGenerator {
       normalMap0: this.waterNormal0,
       normalMap1: this.waterNormal1,
     });
+    water.name = 'WaterSurface';
+    water.frustumCulled = false;
+    water.renderOrder = 12;
     water.rotation.x = -Math.PI / 2;
-    water.position.set(0, WORLD_FLOOR_Y + 0.02, 0);
+    water.position.set(0, WATER_SURFACE_Y, 0);
     water.receiveShadow = true;
     const waterMaterials = Array.isArray(water.material) ? water.material : [water.material];
     for (const material of waterMaterials) {
       material.side = THREE.DoubleSide;
       material.transparent = true;
+      material.depthWrite = false;
+      material.depthTest = true;
+      material.polygonOffset = true;
+      material.polygonOffsetFactor = -1;
+      material.polygonOffsetUnits = -2;
     }
     group.add(water);
 
-    const pathMaterial = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color('#fff2ea'),
-      roughness: 0.22,
-      metalness: 0.08,
-      transmission: 0.12,
-      clearcoat: 0.65,
-    });
+    const instancesByColor = new Map<string, Array<{ x: number; y: number; z: number }>>();
 
-    for (const [x, y, z, sx, sy, sz] of PATH_PADS) {
-      const pad = new THREE.Mesh(this.pathGeometry, pathMaterial);
-      pad.position.set(x, y, z);
-      pad.scale.set(sx, sy, sz);
-      pad.castShadow = true;
-      pad.receiveShadow = true;
-      group.add(pad);
+    for (const tile of PLATFORM_TILES) {
+      let instances = instancesByColor.get(tile.color);
+      if (!instances) {
+        instances = [];
+        instancesByColor.set(tile.color, instances);
+      }
+
+      for (let level = 0; level < tile.stackCount; level += 1) {
+        instances.push({
+          x: tile.x,
+          y: tile.baseY + (level + 0.5) * BLOCK_UNIT,
+          z: tile.z,
+        });
+      }
     }
 
-    const duneMaterial = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color('#ffbfd9'),
-      roughness: 0.38,
-      metalness: 0.05,
-      transmission: 0.1,
-      clearcoat: 0.42,
-    });
+    for (const [color, instances] of instancesByColor) {
+      const instancedTiles = new THREE.InstancedMesh(
+        this.blockGeometry,
+        this.getBlockMaterial(color),
+        instances.length,
+      );
+      instancedTiles.castShadow = true;
+      instancedTiles.receiveShadow = true;
+      instancedTiles.instanceMatrix.setUsage(THREE.StaticDrawUsage);
 
-    for (const [x, y, z, sx, sy, sz] of FOREGROUND_MOUNDS) {
-      const mound = new THREE.Mesh(this.moundGeometry, duneMaterial);
-      mound.position.set(x, y, z);
-      mound.scale.set(sx, sy, sz);
-      mound.castShadow = true;
-      mound.receiveShadow = true;
-      group.add(mound);
+      instances.forEach((instance, index) => {
+        this.instanceDummy.position.set(instance.x, instance.y, instance.z);
+        this.instanceDummy.scale.setScalar(TILE_RENDER_SCALE);
+        this.instanceDummy.updateMatrix();
+        instancedTiles.setMatrixAt(index, this.instanceDummy.matrix);
+      });
+
+      instancedTiles.instanceMatrix.needsUpdate = true;
+      instancedTiles.computeBoundingBox();
+      instancedTiles.computeBoundingSphere();
+      group.add(instancedTiles);
+    }
+
+    for (const jumpPad of JUMP_PADS) {
+      const jumpBlock = new THREE.Mesh(this.blockGeometry, this.createJumpPadMaterial(jumpPad.color));
+      const jumpBlockHeight = BLOCK_UNIT * 0.28;
+      jumpBlock.position.set(jumpPad.x, jumpPad.y + jumpBlockHeight * 0.18, jumpPad.z);
+      jumpBlock.scale.set(jumpPad.width, jumpBlockHeight, jumpPad.depth);
+      jumpBlock.castShadow = true;
+      jumpBlock.receiveShadow = true;
+      group.add(jumpBlock);
+    }
+
+    for (const elevator of MOVING_ELEVATORS) {
+      const liftBlock = new THREE.Mesh(this.blockGeometry, this.getBlockMaterial(elevator.color));
+      liftBlock.position.set(elevator.x, getMovingElevatorTopY(0, elevator) - BLOCK_UNIT * 0.5, elevator.z);
+      liftBlock.scale.setScalar(TILE_RENDER_SCALE);
+      liftBlock.castShadow = true;
+      liftBlock.receiveShadow = true;
+      this.elevatorMeshes.set(elevator.id, liftBlock);
+      group.add(liftBlock);
     }
 
     return group;
+  }
+
+  update(elapsed: number): void {
+    for (const elevator of MOVING_ELEVATORS) {
+      const mesh = this.elevatorMeshes.get(elevator.id);
+      if (!mesh) {
+        continue;
+      }
+
+      mesh.position.y = getMovingElevatorTopY(elapsed, elevator) - BLOCK_UNIT * 0.5;
+    }
+  }
+
+  private getBlockMaterial(color: string): THREE.MeshPhysicalMaterial {
+    const cached = this.blockMaterialCache.get(color);
+    if (cached) {
+      return cached;
+    }
+
+    const material = new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color(color),
+      roughness: 0.2,
+      metalness: 0.14,
+      transmission: 0.08,
+      clearcoat: 0.9,
+      clearcoatRoughness: 0.05,
+      envMapIntensity: 1.75,
+      roughnessMap: metallicFlakeDetail,
+      metalnessMap: metallicFlakeDetail,
+    });
+    this.blockMaterialCache.set(color, material);
+    return material;
+  }
+
+  private createJumpPadMaterial(color: string): THREE.MeshPhysicalMaterial {
+    return new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color(color),
+      emissive: new THREE.Color(color).multiplyScalar(1.1),
+      emissiveIntensity: 1.9,
+      roughness: 0.16,
+      metalness: 0.08,
+      clearcoat: 1,
+      clearcoatRoughness: 0.08,
+      transmission: 0.08,
+      envMapIntensity: 1.6,
+    });
   }
 }

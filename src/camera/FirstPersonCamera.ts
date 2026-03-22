@@ -8,7 +8,6 @@ export class FirstPersonCamera {
   private yaw = Math.PI;
   private pitch = 0.08;
   private isLocked = false;
-  private readonly baseFov = 72;
   private bobTime = 0;
   private bobOffset = 0;
   private landingOffset = 0;
@@ -21,7 +20,7 @@ export class FirstPersonCamera {
     const width = viewport?.width || window.innerWidth || 1;
     const height = viewport?.height || window.innerHeight || 1;
     this.camera = new THREE.PerspectiveCamera(
-      this.baseFov,
+      72,
       width / Math.max(1, height),
       0.1,
       400,
@@ -76,7 +75,12 @@ export class FirstPersonCamera {
     airborne = false,
     landingImpact = 0,
     running = false,
+    speedRatio = 0,
+    normalFov = 72,
+    fastFov = 82,
     clampToFloor = true,
+    zoomAim = false,
+    zoomFov = 30,
   ): void {
     if (!airborne && movementAmount > 0.12) {
       this.bobTime += delta * headBobSpeed * (0.45 + movementAmount);
@@ -85,8 +89,15 @@ export class FirstPersonCamera {
     this.bobOffset = Math.sin(this.bobTime) * headBobAmount * movementAmount;
     const targetLandingOffset = -landingImpact * 0.18;
     this.landingOffset = THREE.MathUtils.damp(this.landingOffset, targetLandingOffset, 18, delta);
-    const targetFov = this.baseFov + (running && !airborne ? 3.4 : 0);
-    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 7, delta);
+    const safeNormalFov = Math.max(40, normalFov);
+    const safeFastFov = Math.max(safeNormalFov, fastFov);
+    const speedBlend = THREE.MathUtils.clamp((speedRatio - 1) * 1.35, 0, 1);
+    const runBlend = running ? (airborne ? 0.82 : 1) : 0;
+    const targetFov = zoomAim
+      ? THREE.MathUtils.clamp(zoomFov, 18, 45)
+      : THREE.MathUtils.lerp(safeNormalFov, safeFastFov, Math.max(speedBlend, runBlend));
+    const dampSpeed = zoomAim ? 16 : 8.2;
+    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, dampSpeed, delta);
     this.camera.updateProjectionMatrix();
     this.camera.position.copy(playerPosition);
     const targetY = playerPosition.y + PLAYER_EYE_HEIGHT + this.bobOffset + this.landingOffset;

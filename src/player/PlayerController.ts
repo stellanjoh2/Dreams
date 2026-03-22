@@ -1,11 +1,15 @@
 import * as THREE from 'three';
-import { WORLD_FLOOR_Y } from '../config/defaults';
+import { WATER_SURFACE_Y, WORLD_FLOOR_Y } from '../config/defaults';
 import type { FxSettings } from '../fx/FxSettings';
 import type { FirstPersonCamera } from '../camera/FirstPersonCamera';
 import type { InputSystem } from '../input/InputSystem';
 
 export class PlayerController {
-  static readonly WATER_SURFACE_Y = WORLD_FLOOR_Y + 0.02;
+  private static readonly GROUND_GRACE_TIME = 0.12;
+  private static readonly STEP_UP_HEIGHT = 0.34;
+  private static readonly STEP_DOWN_SNAP = 0.18;
+  private static readonly LANDING_SNAP_BASE = 0.22;
+  private static readonly LANDING_SNAP_BUFFER = 0.08;
 
   readonly position = new THREE.Vector3(0, WORLD_FLOOR_Y, 12);
   private readonly collisionRadius = 0.55;
@@ -20,6 +24,7 @@ export class PlayerController {
   private readonly right = new THREE.Vector3();
   private readonly lookAxes = new THREE.Vector2();
   private readonly moveAxes = new THREE.Vector2();
+  private readonly jumpPadImpulse = new THREE.Vector3();
 
   private verticalVelocity = 0;
   private grounded = true;
@@ -27,15 +32,19 @@ export class PlayerController {
   private landingImpact = 0;
   private landingGlide = 0;
   private drowningTimer = 0;
+  private groundGraceTimer = 0;
+  private speedRatio = 0;
 
   update(
     delta: number,
     input: InputSystem,
     cameraSystem: FirstPersonCamera,
     settings: FxSettings,
-    getGroundHeightAt: (x: number, z: number) => number | null,
+    getGroundHeightAt: (x: number, z: number, supportRadius?: number, maxHeight?: number) => number | null,
     resolveTerrainCollisions: (position: THREE.Vector3, radius: number, grounded: boolean) => void,
+    getJumpPadImpulse: (position: THREE.Vector3, target: THREE.Vector3) => THREE.Vector3 | null,
     getRespawnPoint: (target: THREE.Vector3) => THREE.Vector3,
+    audioHooks?: { onPlayerJump?: () => void; onJumpPad?: () => void },
   ): void {
     if (this.drowningTimer > 0) {
       this.updateDrowning(delta, cameraSystem, getRespawnPoint);
@@ -63,31 +72,82 @@ export class PlayerController {
       this.desiredMove.normalize();
     }
 
+    const running = input.isRunning();
     const moveSpeed =
       settings.movement.walkSpeed *
-      (input.isRunning() ? settings.movement.runMultiplier : 1);
+      (running ? settings.movement.runMultiplier : 1);
     this.desiredVelocity.copy(this.desiredMove).multiplyScalar(moveSpeed);
 
-    this.applyHorizontalMovement(delta);
+    this.applyHorizontalMovement(delta, running, settings.movement);
     resolveTerrainCollisions(this.position, this.collisionRadius, this.grounded);
-    const groundHeight = getGroundHeightAt(this.position.x, this.position.z);
+    const supportRadius = this.collisionRadius * 0.92;
+    let groundHeight = getGroundHeightAt(
+      this.position.x,
+      this.position.z,
+      supportRadius,
+      this.position.y + PlayerController.STEP_UP_HEIGHT,
+    );
 
     if (this.grounded && groundHeight !== null) {
-      this.position.y = groundHeight;
+      const groundedDelta = groundHeight - this.position.y;
+      if (
+        groundedDelta <= PlayerController.STEP_UP_HEIGHT &&
+        groundedDelta >= -PlayerController.STEP_DOWN_SNAP
+      ) {
+        this.position.y = groundHeight;
+        this.groundGraceTimer = PlayerController.GROUND_GRACE_TIME;
+      }
     }
 
-    if (this.grounded && input.consumeJump()) {
-      this.grounded = false;
-      this.verticalVelocity = settings.movement.jumpForce;
+    if (this.grounded) {
+      const jumpPadBoost = getJumpPadImpulse(this.position, this.jumpPadImpulse);
+
+      if (jumpPadBoost) {
+        this.grounded = false;
+        this.verticalVelocity = jumpPadBoost.y;
+        this.horizontalVelocity.x =
+          Math.abs(jumpPadBoost.x) > 0.001
+            ? jumpPadBoost.x
+            : this.horizontalVelocity.x * 0.4;
+        this.horizontalVelocity.z =
+          Math.abs(jumpPadBoost.z) > 0.001
+            ? jumpPadBoost.z
+            : this.horizontalVelocity.z * 0.4;
+        this.landingImpact = 0;
+        this.landingGlide = 0;
+        audioHooks?.onJumpPad?.();
+      } else if (input.consumeJump()) {
+        this.grounded = false;
+        this.verticalVelocity = settings.movement.jumpForce;
+        audioHooks?.onPlayerJump?.();
+      }
     }
 
     const gravity = this.verticalVelocity > 0 ? 11.9 : 15.6;
+    const previousY = this.position.y;
     this.verticalVelocity -= gravity * delta;
     this.position.y += this.verticalVelocity * delta;
     resolveTerrainCollisions(this.position, this.collisionRadius, this.grounded);
+    groundHeight = getGroundHeightAt(
+      this.position.x,
+      this.position.z,
+      supportRadius,
+      previousY + PlayerController.LANDING_SNAP_BUFFER,
+    );
+    this.groundGraceTimer = Math.max(0, this.groundGraceTimer - delta);
 
     const impactSpeed = this.verticalVelocity;
-    if (groundHeight !== null && this.position.y <= groundHeight) {
+    const landingSnapDistance = Math.max(
+      PlayerController.LANDING_SNAP_BASE,
+      Math.abs(impactSpeed) * delta + PlayerController.LANDING_SNAP_BUFFER,
+    );
+    const canSnapToGround =
+      groundHeight !== null &&
+      impactSpeed <= 0 &&
+      previousY >= groundHeight - PlayerController.LANDING_SNAP_BUFFER &&
+      this.position.y <= groundHeight + landingSnapDistance;
+
+    if (groundHeight !== null && (this.position.y <= groundHeight || canSnapToGround)) {
       this.position.y = groundHeight;
       if (!this.grounded && impactSpeed < -2) {
         this.landingImpact = Math.max(this.landingImpact, THREE.MathUtils.clamp(-impactSpeed / 12, 0, 1));
@@ -105,7 +165,12 @@ export class PlayerController {
       }
       this.verticalVelocity = 0;
       this.grounded = true;
-    } else if (this.grounded && (groundHeight === null || this.position.y > groundHeight + 0.08)) {
+      this.groundGraceTimer = PlayerController.GROUND_GRACE_TIME;
+    } else if (
+      this.grounded &&
+      this.groundGraceTimer === 0 &&
+      (groundHeight === null || this.position.y > groundHeight + 0.18)
+    ) {
       this.grounded = false;
     }
 
@@ -115,6 +180,15 @@ export class PlayerController {
     this.movementIntensity = THREE.MathUtils.lerp(
       this.movementIntensity,
       THREE.MathUtils.clamp(this.horizontalVelocity.length() / moveSpeed || 0, 0, 1),
+      Math.min(1, delta * 8),
+    );
+    this.speedRatio = THREE.MathUtils.lerp(
+      this.speedRatio,
+      THREE.MathUtils.clamp(
+        this.horizontalVelocity.length() / Math.max(0.001, settings.movement.walkSpeed),
+        0,
+        settings.movement.runMultiplier,
+      ),
       Math.min(1, delta * 8),
     );
 
@@ -130,7 +204,12 @@ export class PlayerController {
       settings.cameraFeel.headBobSpeed,
       !this.grounded,
       this.landingImpact,
-      input.isRunning(),
+      running,
+      this.speedRatio,
+      settings.cameraFeel.normalFov,
+      settings.cameraFeel.fastFov,
+      true,
+      input.isZoomAimHeld(),
     );
   }
 
@@ -146,6 +225,8 @@ export class PlayerController {
     this.landingImpact = 0;
     this.landingGlide = 0;
     this.drowningTimer = 0;
+    this.groundGraceTimer = PlayerController.GROUND_GRACE_TIME;
+    this.speedRatio = 0;
   }
 
   getMovementIntensity(): number {
@@ -153,10 +234,14 @@ export class PlayerController {
   }
 
   getWaterSubmersionDepth(): number {
-    return Math.max(0, PlayerController.WATER_SURFACE_Y - this.position.y);
+    return Math.max(0, WATER_SURFACE_Y - this.position.y);
   }
 
-  private applyHorizontalMovement(delta: number): void {
+  private applyHorizontalMovement(
+    delta: number,
+    running: boolean,
+    movementSettings: FxSettings['movement'],
+  ): void {
     if (this.grounded) {
       const baseResponse = this.desiredMove.lengthSq() > 0.0001 ? 18 : 10;
       const targetResponse = this.desiredMove.lengthSq() > 0.0001 ? 7.5 : 1.8;
@@ -175,7 +260,12 @@ export class PlayerController {
       );
     } else if (this.desiredMove.lengthSq() > 0.0001) {
       this.velocityDelta.copy(this.desiredVelocity).sub(this.horizontalVelocity).setY(0);
-      const maxAirStep = delta * 5.2;
+      const runAirControl = THREE.MathUtils.clamp(
+        (movementSettings.runMultiplier - 1) / Math.max(0.01, movementSettings.runMultiplier),
+        0,
+        0.5,
+      );
+      const maxAirStep = delta * (running ? 12.6 + runAirControl * 5 : 9.8);
       const deltaLength = this.velocityDelta.length();
 
       if (deltaLength > maxAirStep) {
@@ -184,7 +274,7 @@ export class PlayerController {
 
       this.horizontalVelocity.add(this.velocityDelta);
     } else {
-      const airDrag = Math.max(0, 1 - delta * 0.05);
+      const airDrag = Math.max(0, 1 - delta * 0.18);
       this.horizontalVelocity.multiplyScalar(airDrag);
     }
 
@@ -198,6 +288,7 @@ export class PlayerController {
     this.verticalVelocity = Math.min(this.verticalVelocity, -1.75);
     this.landingImpact = 0;
     this.landingGlide = 0;
+    this.groundGraceTimer = 0;
   }
 
   private updateDrowning(
@@ -211,6 +302,7 @@ export class PlayerController {
     this.verticalVelocity = THREE.MathUtils.damp(this.verticalVelocity, -4.4, 4.8, delta);
     this.position.y += this.verticalVelocity * delta;
     this.movementIntensity = THREE.MathUtils.damp(this.movementIntensity, 0, 8, delta);
+    this.speedRatio = THREE.MathUtils.damp(this.speedRatio, 0, 8, delta);
 
     if (this.drowningTimer === 0 || this.position.y < WORLD_FLOOR_Y - 3.6) {
       this.respawn(getRespawnPoint(this.respawnTarget));
@@ -225,6 +317,9 @@ export class PlayerController {
       true,
       0,
       false,
+      0,
+      72,
+      82,
       false,
     );
   }

@@ -16,6 +16,8 @@ export interface CameraFeelSettings {
   lookSensitivity: number;
   headBobAmount: number;
   headBobSpeed: number;
+  normalFov: number;
+  fastFov: number;
 }
 
 export interface FresnelSettings {
@@ -32,7 +34,15 @@ export interface MovementSettings {
 
 export interface ParticleSettings {
   amount: number;
+  /** World-space point size (attenuated by distance); ~3+ reads clearly at normal FOV. */
+  size: number;
   color: string;
+}
+
+/** 0 = mute, 1 = full level (multiplies internal mix). */
+export interface AudioVolumeSettings {
+  musicVolume: number;
+  fxVolume: number;
 }
 
 export interface FxSettings {
@@ -46,6 +56,7 @@ export interface FxSettings {
   fresnel: FresnelSettings;
   movement: MovementSettings;
   particles: ParticleSettings;
+  audio: AudioVolumeSettings;
 }
 
-export const FX_SETTINGS_STORAGE_KEY = 'candylands.fx.settings.v5';
+export const FX_SETTINGS_STORAGE_KEY = 'candylands.fx.settings.v6';

@@ -1,19 +1,31 @@
 import * as THREE from 'three';
+import { createMetallicFlakeOrmTexture } from '../materials/MetallicFlakeDetail';
 
 const toColor = (value: string): THREE.Color => new THREE.Color(value);
 const CRYSTAL_ROTATION = new THREE.Matrix4().makeRotationX(Math.PI / 2);
+const createCrystalGeometry = (): THREE.BufferGeometry => {
+  const geometry = new THREE.OctahedronGeometry(0.85, 0).applyMatrix4(CRYSTAL_ROTATION);
+  geometry.computeBoundingBox();
+  const minY = geometry.boundingBox?.min.y ?? 0;
+  geometry.translate(0, -minY, 0);
+  return geometry;
+};
+
+const metallicFlakeDetail = createMetallicFlakeOrmTexture(8);
 
 export class PropFactory {
   private readonly sharedCandyMaterialOptions: THREE.MeshPhysicalMaterialParameters = {
-    roughness: 0.28,
-    metalness: 0.1,
+    roughness: 0.2,
+    metalness: 0.16,
     transmission: 0.24,
     thickness: 0.7,
-    clearcoat: 0.95,
-    clearcoatRoughness: 0.12,
+    clearcoat: 1,
+    clearcoatRoughness: 0.055,
     iridescence: 0.35,
     iridescenceIOR: 1.18,
-    envMapIntensity: 1.4,
+    envMapIntensity: 1.7,
+    roughnessMap: metallicFlakeDetail,
+    metalnessMap: metallicFlakeDetail,
   };
   private readonly materialCache = new Map<string, THREE.Material>();
   private readonly candyRockGeometry = new THREE.IcosahedronGeometry(1, 5);
@@ -23,7 +35,7 @@ export class PropFactory {
   private readonly cloudPuffGeometry = new THREE.SphereGeometry(1, 24, 18);
   private readonly treeTrunkGeometry = new THREE.CylinderGeometry(0.24, 0.34, 2.2, 10);
   private readonly treeTopGeometry = new THREE.SphereGeometry(1.2, 28, 22);
-  private readonly crystalGeometry = new THREE.OctahedronGeometry(0.85, 0).applyMatrix4(CRYSTAL_ROTATION);
+  private readonly crystalGeometry = createCrystalGeometry();
 
   createCandyRock(color: string, scale: THREE.Vector3Tuple): THREE.Mesh {
     const mesh = new THREE.Mesh(this.candyRockGeometry, this.createCandyMaterial(color));
@@ -128,7 +140,7 @@ export class PropFactory {
     });
 
     const crystal = new THREE.Mesh(this.crystalGeometry, material);
-    crystal.scale.set(0.75, 1.45, 0.75);
+    crystal.scale.set(0.58, 0.92, 0.58);
     crystal.userData.isCrystal = true;
     this.applyShadowFlags(crystal);
     return crystal;
@@ -156,8 +168,8 @@ export class PropFactory {
 
   private createCloudMaterial(color: string): THREE.MeshLambertMaterial {
     const key = this.getMaterialKey('cloud', color, {
-      opacity: 0.72,
-      transparent: true,
+      opacity: 1,
+      transparent: false,
       emissiveLift: 0,
     });
     const cached = this.materialCache.get(key);
@@ -167,8 +179,8 @@ export class PropFactory {
 
     const material = new THREE.MeshLambertMaterial({
       color: toColor(color),
-      transparent: true,
-      opacity: 0.72,
+      transparent: false,
+      opacity: 1,
     });
     this.materialCache.set(key, material);
     return material;

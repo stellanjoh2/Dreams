@@ -18,8 +18,13 @@ type SliderConfig = {
     | 'movement.walkSpeed'
     | 'movement.jumpForce'
     | 'particles.amount'
+    | 'particles.size'
     | 'cameraFeel.lookSensitivity'
-    | 'cameraFeel.headBobAmount';
+    | 'cameraFeel.headBobAmount'
+    | 'cameraFeel.normalFov'
+    | 'cameraFeel.fastFov'
+    | 'audio.musicVolume'
+    | 'audio.fxVolume';
   label: string;
   min: number;
   max: number;
@@ -31,12 +36,33 @@ const fmt = (value: number, digits = 2): string => value.toFixed(digits);
 
 const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
   {
+    title: 'Audio',
+    fields: [
+      {
+        key: 'audio.musicVolume',
+        label: 'Music',
+        min: 0,
+        max: 1,
+        step: 0.01,
+        format: (value) => `${Math.round(value * 100)}%`,
+      },
+      {
+        key: 'audio.fxVolume',
+        label: 'FX (jump, pads, crystals)',
+        min: 0,
+        max: 1,
+        step: 0.01,
+        format: (value) => `${Math.round(value * 100)}%`,
+      },
+    ],
+  },
+  {
     title: 'Post FX',
     fields: [
       { key: 'exposure', label: 'Exposure', min: 0.6, max: 2.5, step: 0.01 },
       { key: 'contrast', label: 'Contrast', min: 0.6, max: 1.6, step: 0.01 },
       { key: 'saturation', label: 'Saturation', min: 0.4, max: 1.8, step: 0.01 },
-      { key: 'vignette', label: 'Vignette', min: 0, max: 0.65, step: 0.01 },
+      { key: 'vignette', label: 'Vignette', min: 0, max: 2, step: 0.01 },
       { key: 'bloom.strength', label: 'Bloom Strength', min: 0, max: 2.8, step: 0.01 },
       { key: 'bloom.radius', label: 'Bloom Radius', min: 0, max: 1, step: 0.01 },
       { key: 'bloom.threshold', label: 'Bloom Threshold', min: 0, max: 1.2, step: 0.01 },
@@ -81,6 +107,14 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
     title: 'Particles',
     fields: [
       { key: 'particles.amount', label: 'Particle Amount', min: 0, max: 320, step: 1 },
+      {
+        key: 'particles.size',
+        label: 'Particle Size',
+        min: 0.04,
+        max: 12,
+        step: 0.02,
+        format: (value) => value.toFixed(2),
+      },
     ],
   },
   {
@@ -103,6 +137,22 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
         max: 0.12,
         step: 0.001,
         format: (value) => value.toFixed(3),
+      },
+      {
+        key: 'cameraFeel.normalFov',
+        label: 'Normal FOV',
+        min: 60,
+        max: 95,
+        step: 1,
+        format: (value) => value.toFixed(0),
+      },
+      {
+        key: 'cameraFeel.fastFov',
+        label: 'Fast FOV',
+        min: 65,
+        max: 130,
+        step: 1,
+        format: (value) => value.toFixed(0),
       },
     ],
   },

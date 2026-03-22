@@ -21,20 +21,16 @@ export class CrystalSystem {
     this.elapsed += delta;
 
     for (const crystal of this.crystals) {
-      if (crystal.collected && this.elapsed >= crystal.respawnAt) {
-        crystal.collected = false;
-        crystal.mesh.visible = true;
-      }
-
       if (crystal.collected) {
         continue;
       }
 
-      const bob = Math.sin(this.elapsed * 1.8 + crystal.basePosition.x * 0.15) * 0.18;
+      const bobWave = Math.sin(this.elapsed * 1.8 + crystal.basePosition.x * 0.15);
+      const bob = 0.16 + (bobWave * 0.5 + 0.5) * 0.12;
       crystal.mesh.position.copy(crystal.basePosition);
       crystal.mesh.position.y += bob;
       crystal.mesh.rotation.y += delta * 0.9;
-      crystal.mesh.rotation.z = Math.sin(this.elapsed * 2.2 + crystal.basePosition.z * 0.1) * 0.08;
+      crystal.mesh.rotation.z = Math.sin(this.elapsed * 2.2 + crystal.basePosition.z * 0.1) * 0.04;
 
       const material = crystal.mesh.material;
       if (material instanceof THREE.MeshPhysicalMaterial) {
@@ -65,6 +61,6 @@ export class CrystalSystem {
   collect(crystal: CrystalInstance): void {
     crystal.collected = true;
     crystal.mesh.visible = false;
-    crystal.respawnAt = this.elapsed + 14;
+    crystal.respawnAt = Number.POSITIVE_INFINITY;
   }
 }

@@ -13,6 +13,8 @@ export class InputSystem {
   private gamepadMove = new THREE.Vector2();
   private gamepadLook = new THREE.Vector2();
   private running = false;
+  /** Right mouse held: zoom / aim (handled in App + camera). */
+  private zoomAimHeld = false;
 
   constructor() {
     this.handleKeyDown = this.handleKeyDown.bind(this);
@@ -69,6 +71,14 @@ export class InputSystem {
     return this.running;
   }
 
+  setZoomAimHeld(value: boolean): void {
+    this.zoomAimHeld = value;
+  }
+
+  isZoomAimHeld(): boolean {
+    return this.zoomAimHeld;
+  }
+
   consumeJump(): boolean {
     const value = this.jumpQueued;
     this.jumpQueued = false;
@@ -96,7 +106,12 @@ export class InputSystem {
     }
 
     if (event.code === 'Space') {
-      this.jumpQueued = true;
+      if (document.pointerLockElement) {
+        event.preventDefault();
+      }
+      if (!event.repeat) {
+        this.jumpQueued = true;
+      }
     }
 
     if (event.code === 'KeyE') {

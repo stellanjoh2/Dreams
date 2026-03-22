@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "plants:pack": "node scripts/pack-curated-plants.mjs",
+    "gltf:list-animations": "node scripts/list-glb-animations.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.183.1",

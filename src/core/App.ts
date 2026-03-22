@@ -62,12 +62,15 @@ export class App {
     this.cameraSystem.setLockChangeListener((locked) => {
       this.ui.setPointerLocked(locked);
       if (locked) {
-        void this.audio.unlock();
+        void this.audio.unlock().then(() => this.reapplyAudioVolumes());
       }
     });
 
-    this.world = new WorldManager();
+    this.world = new WorldManager({
+      playCactusEnemyProximity: (x, y, z) => this.audio.playCactusEnemyProximity(x, y, z),
+    });
     const crystals = this.world.build(this.settings);
+    this.player.respawn(this.world.getRespawnPoint(new THREE.Vector3()));
     this.crystalSystem.setCrystals(crystals);
 
     this.interactionSystem = new InteractionSystem(this.crystalSystem, this.ui, this.audio);
@@ -87,12 +90,14 @@ export class App {
       () => this.resetSettings(),
     );
     this.lensFlare = new LensFlareOverlay(this.ui.fxMount);
+    this.lensFlare.setOcclusionObjects(this.world.getLensFlareOccluders());
 
     this.applySettings();
     this.ui.setChromeVisible(false);
 
     this.ui.startButton.addEventListener('click', this.handleStart);
     this.ui.viewport.addEventListener('pointerdown', this.handleStart);
+    this.bindZoomAimPointerHandlers(this.rendererCore.canvas);
     window.addEventListener('resize', this.handleResize);
 
     requestAnimationFrame(this.loop);
@@ -104,13 +109,50 @@ export class App {
     }
 
     this.cameraSystem?.requestLock();
-    void this.audio.unlock();
+    void this.audio.unlock().then(() => this.reapplyAudioVolumes());
+  }
+
+  private reapplyAudioVolumes(): void {
+    this.audio.applyVolumeSettings(this.settings.audio ?? DEFAULT_FX_SETTINGS.audio);
+  }
+
+  /** Hold right mouse: narrow FOV “zoom” while playing (see `FirstPersonCamera.updateFromPlayer`). */
+  private bindZoomAimPointerHandlers(canvas: HTMLCanvasElement): void {
+    const clearZoom = (): void => {
+      this.input.setZoomAimHeld(false);
+    };
+
+    canvas.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+    });
+
+    canvas.addEventListener('pointerdown', (event) => {
+      if (event.button === 2) {
+        event.preventDefault();
+        this.input.setZoomAimHeld(true);
+      }
+    });
+
+    canvas.addEventListener('pointerup', (event) => {
+      if (event.button === 2) {
+        this.input.setZoomAimHeld(false);
+      }
+    });
+
+    canvas.addEventListener('pointerleave', clearZoom);
+    window.addEventListener('pointerup', (event) => {
+      if (event.button === 2) {
+        clearZoom();
+      }
+    });
+    window.addEventListener('blur', clearZoom);
   }
 
   private applySettings(): void {
     this.cameraSystem?.setSensitivity(this.settings.cameraFeel.lookSensitivity);
     this.world?.applyFxSettings(this.settings);
     this.postProcessing?.applySettings(this.settings);
+    this.reapplyAudioVolumes();
     this.editor?.sync();
     this.lensFlare?.setColor('#ffd39f');
     this.lensFlare?.setIntensity(this.settings.atmosphere.sunGlow);
@@ -127,6 +169,7 @@ export class App {
     Object.assign(this.settings.fresnel, fresh.fresnel);
     Object.assign(this.settings.movement, fresh.movement);
     Object.assign(this.settings.particles, fresh.particles);
+    Object.assign(this.settings.audio, fresh.audio);
     this.applySettings();
   }
 
@@ -149,6 +192,7 @@ export class App {
 
     const delta = Math.min(0.1, this.lastFrame === 0 ? 1 / 60 : (time - this.lastFrame) / 1000);
     this.lastFrame = time;
+    const elapsed = time / 1000;
 
     this.input.update();
 
@@ -159,21 +203,29 @@ export class App {
       }
     }
 
+    this.world.syncDynamicPlatforms(elapsed);
+    this.audio.tickElevatorSounds(elapsed, this.cameraSystem.camera);
+
     if (this.cameraSystem.locked) {
       this.player.update(
         delta,
         this.input,
         this.cameraSystem,
         this.settings,
-        (x, z) => this.world?.getGroundHeightAt(x, z) ?? null,
+        (x, z, supportRadius, maxHeight) => this.world?.getGroundHeightAt(x, z, supportRadius, maxHeight) ?? null,
         (position, radius, grounded) => this.world?.resolveTerrainCollisions(position, radius, grounded),
+        (position, target) => this.world?.getJumpPadImpulse(position, target) ?? null,
         (target) => this.world?.getRespawnPoint(target) ?? target.set(0, 0, 12),
+        {
+          onPlayerJump: () => this.audio.playJump(),
+          onJumpPad: () => this.audio.playJumpPad(),
+        },
       );
     } else {
       this.cameraSystem.updateFromPlayer(this.player.position, delta, 0, 0, 1, false, 0, false);
     }
 
-    this.world.update(delta, time / 1000);
+    this.world.update(delta, elapsed, this.cameraSystem.camera, this.player.position);
     this.crystalSystem.update(delta);
     this.interactionSystem?.update(this.cameraSystem.getPosition(this.cameraPosition), this.input);
     this.ui.setUnderwaterDepth(this.player.getWaterSubmersionDepth());
@@ -188,6 +240,7 @@ export class App {
       this.world.getSunWorldPosition(this.sunPosition),
       width,
       height,
+      delta,
     );
     this.rendererCore.prepareFrame();
     if (this.postProcessing) {
@@ -207,7 +260,7 @@ export class App {
       }
 
       const parsed = JSON.parse(stored) as Partial<FxSettings>;
-      return {
+      const merged: FxSettings = {
         ...fresh,
         ...parsed,
         bloom: { ...fresh.bloom, ...parsed.bloom },
@@ -216,7 +269,17 @@ export class App {
         fresnel: { ...fresh.fresnel, ...parsed.fresnel },
         movement: { ...fresh.movement, ...parsed.movement },
         particles: { ...fresh.particles, ...parsed.particles },
+        audio: { ...fresh.audio, ...(parsed.audio ?? {}) },
       };
+      const m = Number(merged.audio.musicVolume);
+      const f = Number(merged.audio.fxVolume);
+      if (!Number.isFinite(m)) {
+        merged.audio.musicVolume = fresh.audio.musicVolume;
+      }
+      if (!Number.isFinite(f)) {
+        merged.audio.fxVolume = fresh.audio.fxVolume;
+      }
+      return merged;
     } catch {
       return fresh;
     }

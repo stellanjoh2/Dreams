@@ -22,7 +22,6 @@ export class InteractionSystem {
 
   update(cameraPosition: THREE.Vector3, input: InputSystem): void {
     this.queryPosition.copy(cameraPosition);
-    this.queryPosition.y = 0.85;
 
     const nearest = this.crystals.getNearestCrystal(this.queryPosition, 2.35);
 

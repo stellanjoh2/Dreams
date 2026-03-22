@@ -1,24 +1,68 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { FxSettings } from '../fx/FxSettings';
 import { isFresnelCapableMaterial, updateFresnelMaterial } from '../materials/FresnelMaterial';
 import { PropFactory } from './PropFactory';
 import { AmbientDustSystem } from './AmbientDustSystem';
+import { FishSchoolsSystem } from './FishSchoolsSystem';
+import { FishingBoatProp } from './FishingBoatProp';
+import { CactusEnemySystem } from './CactusEnemySystem';
 import { TerrainGenerator } from './TerrainGenerator';
 import { TerrainPhysics } from './TerrainPhysics';
-import { PATH_PADS } from './TerrainLayout';
+import {
+  BLOCK_UNIT,
+  CRYSTAL_ANCHORS,
+  DECOR_ANCHORS,
+  JUMP_PADS,
+  PLATFORM_SURFACE_TILES,
+  RESPAWN_ANCHORS,
+} from './TerrainLayout';
 import type { CrystalInstance } from '../systems/CrystalSystem';
+
+/** Optional hooks from `App` (e.g. Web Audio) — keeps `WorldManager` free of `AudioSystem` import. */
+export type WorldAudioHooks = {
+  playCactusEnemyProximity?: (x: number, y: number, z: number) => void;
+};
+
+type PlantBucket = 'tall' | 'balanced' | 'wide';
+
+type CuratedPlantProfile = {
+  url: string;
+  bucket: PlantBucket;
+  scale: number;
+  /** Tall plants are normally off-route only; set true so this variant also scatters on spawn/path. */
+  scatterOnRoute?: boolean;
+};
 
 export class WorldManager {
   readonly scene = new THREE.Scene();
+  /** Outer group: world position + yaw live here; origin = AABB bottom-face center on the ground (XZ not shifted by volumetric center). */
+  private static readonly PLANT_PIVOT_NAME = 'PlantPivot';
+  /** Inner group: uniform fit scale + per-tile jitter scale; pivot offset lives here so root scale does not shear the pivot. */
+  private static readonly PLANT_MESH_ROOT_NAME = 'PlantMeshRoot';
+  private static readonly ENVIRONMENT_MAP_URL = '/hdri/MR_EXT-010_BlueEndDayPinkClouds_Moorea_4k.png';
+  private static readonly CURATED_PLANT_PROFILES: readonly CuratedPlantProfile[] = [
+    { url: '/plants/curated/candy-bloom-a.glb', bucket: 'balanced', scale: 1.18 },
+    { url: '/plants/curated/candy-bloom-b.glb', bucket: 'balanced', scale: 1.08 },
+    { url: '/plants/curated/candy-shrub-a.glb', bucket: 'balanced', scale: 1.12 },
+    { url: '/plants/curated/candy-shrub-b.glb', bucket: 'balanced', scale: 1.04 },
+    // Purple spike only for tall bucket (replaces spike-a / spike-b); allowed on main path so it shows on the map.
+    { url: '/plants/curated/candy-spike-purple.glb', bucket: 'tall', scale: 0.96, scatterOnRoute: true },
+  ];
 
   private readonly worldRoot = new THREE.Group();
+  private readonly plantScatterRoot = new THREE.Group();
   private readonly props = new PropFactory();
   private readonly ambientDust = new AmbientDustSystem();
+  private readonly fishSchools = new FishSchoolsSystem(this.worldRoot);
+  private readonly fishingBoat = new FishingBoatProp(this.worldRoot);
   private readonly terrain = new TerrainGenerator();
   private readonly terrainPhysics = new TerrainPhysics();
+  private readonly cactusEnemies: CactusEnemySystem;
+  private readonly plantLoader = new GLTFLoader();
   private readonly driftingClouds: THREE.Object3D[] = [];
-  private readonly sunAnchor = new THREE.Vector3(32, 42, -84);
-  private readonly sunTargetPosition = new THREE.Vector3(0, 4, 10);
+  private readonly sunAnchor = new THREE.Vector3(-32, 42, 84);
+  private readonly sunTargetPosition = new THREE.Vector3(0, 4, -10);
 
   private sunMesh?: THREE.Mesh;
   private skyDome?: THREE.Mesh;
@@ -27,10 +71,10 @@ export class WorldManager {
   private sunLight?: THREE.DirectionalLight;
   private sunLightTarget?: THREE.Object3D;
   private coolLight?: THREE.PointLight;
+  private environmentTexture?: THREE.Texture;
+  private plantScatterRequested = false;
   private readonly sunWorldPosition = new THREE.Vector3();
-  private readonly respawnPoints = PATH_PADS.map(
-    ([x, y, z, , sy]) => new THREE.Vector3(x, y + sy * 0.5 + 0.04, z),
-  );
+  private readonly respawnPoints: THREE.Vector3[] = [];
   private readonly terrainSnapPosition = new THREE.Vector3();
   private readonly terrainSnapNormal = new THREE.Vector3();
   private readonly terrainSnapUp = new THREE.Vector3(0, 1, 0);
@@ -40,8 +84,20 @@ export class WorldManager {
   private readonly terrainSnapIdentityQuaternion = new THREE.Quaternion();
   private nextRespawnIndex = 0;
 
-  constructor() {
+  constructor(audioHooks?: WorldAudioHooks) {
+    this.cactusEnemies = new CactusEnemySystem(
+      this.worldRoot,
+      this.terrainPhysics,
+      audioHooks?.playCactusEnemyProximity,
+    );
     this.scene.add(this.worldRoot);
+
+    for (const anchor of RESPAWN_ANCHORS) {
+      const sample = this.terrainPhysics.getNearestSpawnSurface(anchor.x, anchor.z);
+      if (sample) {
+        this.respawnPoints.push(sample.position.clone().add(new THREE.Vector3(0, BLOCK_UNIT * 0.03, 0)));
+      }
+    }
   }
 
   build(settings: FxSettings): CrystalInstance[] {
@@ -51,19 +107,28 @@ export class WorldManager {
       settings.atmosphere.fogDensity,
     );
 
+    this.loadEnvironmentMap();
     this.buildSkyDome();
     this.buildLights(settings);
     this.buildSun();
     this.worldRoot.add(this.terrain.createGround());
+    this.fishSchools.load();
+    this.fishingBoat.load();
+    this.cactusEnemies.load();
+    this.worldRoot.add(this.plantScatterRoot);
     this.buildLandmarks();
     this.buildClouds();
-    this.worldRoot.add(this.ambientDust.points);
+    this.worldRoot.add(this.ambientDust.mesh);
     this.ambientDust.applySettings(settings.particles);
 
     return this.buildCrystals();
   }
 
-  update(delta: number, elapsed: number): void {
+  update(delta: number, elapsed: number, camera?: THREE.Camera, playerPosition?: THREE.Vector3): void {
+    this.prepareWaterReflectorForFrame();
+
+    this.syncDynamicPlatforms(elapsed);
+
     for (const [index, cloud] of this.driftingClouds.entries()) {
       cloud.position.x += delta * (0.18 + index * 0.015);
       cloud.position.z += Math.sin(elapsed * 0.1 + index) * delta * 0.2;
@@ -79,7 +144,28 @@ export class WorldManager {
       this.sunMesh.scale.setScalar(0.38 * pulse);
     }
 
-    this.ambientDust.update(elapsed);
+    this.ambientDust.update(elapsed, camera);
+    this.fishSchools.update(delta, elapsed);
+    this.fishingBoat.update(delta, elapsed);
+    this.cactusEnemies.update(delta, elapsed, playerPosition ?? null, camera ?? null);
+  }
+
+  /**
+   * Water2 reflector skips rendering when the mirror plane faces away from the camera (e.g. underwater
+   * or low grazing angles), which clears the reflection texture and makes the surface vanish. Force a
+   * pass every frame before the main render / post-process scene pass.
+   */
+  private prepareWaterReflectorForFrame(): void {
+    const water = this.worldRoot.getObjectByName('WaterSurface');
+    const sampler = water?.userData?.waterReflectionSampler as { reflector?: { forceUpdate: boolean } } | undefined;
+    if (sampler?.reflector) {
+      sampler.reflector.forceUpdate = true;
+    }
+  }
+
+  syncDynamicPlatforms(elapsed: number): void {
+    this.terrain.update(elapsed);
+    this.terrainPhysics.update(elapsed);
   }
 
   applyFxSettings(settings: FxSettings): void {
@@ -108,6 +194,10 @@ export class WorldManager {
     }
 
     this.ambientDust.applySettings(settings.particles);
+
+    if (this.environmentTexture) {
+      this.scene.environment = this.environmentTexture;
+    }
 
     this.worldRoot.traverse((child) => {
       if (!(child as THREE.Mesh).isMesh) {
@@ -139,12 +229,20 @@ export class WorldManager {
     return target.copy(this.sunWorldPosition);
   }
 
-  getGroundHeightAt(x: number, z: number): number | null {
-    return this.terrainPhysics.getGroundHeightAt(x, z);
+  getLensFlareOccluders(): THREE.Object3D[] {
+    return [this.worldRoot];
+  }
+
+  getGroundHeightAt(x: number, z: number, supportRadius?: number, maxHeight?: number): number | null {
+    return this.terrainPhysics.getGroundHeightAt(x, z, supportRadius, maxHeight);
   }
 
   resolveTerrainCollisions(position: THREE.Vector3, radius: number, grounded: boolean): void {
     this.terrainPhysics.resolvePlayerCollisions(position, radius, grounded);
+  }
+
+  getJumpPadImpulse(position: THREE.Vector3, target = new THREE.Vector3()): THREE.Vector3 | null {
+    return this.terrainPhysics.getJumpPadImpulse(position, target);
   }
 
   getRespawnPoint(target = new THREE.Vector3()): THREE.Vector3 {
@@ -215,155 +313,51 @@ export class WorldManager {
   }
 
   private buildLandmarks(): void {
-    this.buildPinkGrove();
-    this.buildCrystalValley();
-    this.buildSunClearing();
-    this.buildSilentRocks();
+    this.buildIslandDecor();
+    this.loadPlantScatter();
   }
 
-  private buildPinkGrove(): void {
-    const grove = new THREE.Group();
-    grove.position.set(-24, 0, -12);
+  private buildIslandDecor(): void {
+    for (const anchor of DECOR_ANCHORS) {
+      let object: THREE.Object3D;
+      let heightOffset = anchor.heightOffsetUnits * BLOCK_UNIT;
 
-    const colors = ['#ff9fd5', '#ffc6e6', '#ffcf9f'];
+      switch (anchor.kind) {
+        case 'tree':
+          object = this.props.createTree(anchor.primaryColor, anchor.secondaryColor ?? '#ff9bd3');
+          heightOffset = 0;
+          break;
+        case 'cactus':
+          object = this.props.createCactus(anchor.primaryColor);
+          heightOffset = 0;
+          break;
+        case 'monolith':
+          object = this.props.createMonolith(anchor.primaryColor, [
+            BLOCK_UNIT * 0.95 * anchor.scale,
+            BLOCK_UNIT * anchor.heightOffsetUnits * 2,
+            BLOCK_UNIT * 1.02 * anchor.scale,
+          ]);
+          break;
+        default:
+          object = this.props.createCandyRock(anchor.primaryColor, [
+            BLOCK_UNIT * 0.85 * anchor.scale,
+            BLOCK_UNIT * anchor.heightOffsetUnits * 1.65,
+            BLOCK_UNIT * 0.95 * anchor.scale,
+          ]);
+          break;
+      }
 
-    for (let index = 0; index < 9; index += 1) {
-      const rock = this.props.createCandyRock(colors[index % colors.length], [
-        3 + (index % 3),
-        2 + (index % 2) * 1.1,
-        2.6 + (index % 4) * 0.45,
-      ]);
-      const localX = (index % 3) * 6 - 6;
-      const localZ = Math.floor(index / 3) * 5 - 5;
       this.placeObjectOnTerrain(
-        grove,
-        rock,
-        grove.position.x + localX,
-        grove.position.z + localZ,
-        rock.scale.y * 0.48,
-        index * 0.42,
-        0.28,
+        this.worldRoot,
+        object,
+        anchor.x,
+        anchor.z,
+        heightOffset,
+        anchor.yaw,
+        anchor.tiltAmount,
       );
-      grove.add(rock);
+      this.worldRoot.add(object);
     }
-
-    for (let index = 0; index < 5; index += 1) {
-      const tree = this.props.createTree('#ffe1b5', '#ff9bd3');
-      const localX = -9 + index * 4.5;
-      const localZ = -8 + (index % 2) * 5;
-      this.placeObjectOnTerrain(
-        grove,
-        tree,
-        grove.position.x + localX,
-        grove.position.z + localZ,
-        0,
-        index * 0.58,
-        0.18,
-      );
-      grove.add(tree);
-    }
-
-    this.worldRoot.add(grove);
-  }
-
-  private buildCrystalValley(): void {
-    const valley = new THREE.Group();
-    valley.position.set(18, 0, -16);
-
-    for (let index = 0; index < 7; index += 1) {
-      const monolith = this.props.createMonolith('#88a1ff', [
-        2 + (index % 2) * 0.7,
-        5 + (index % 3) * 2.3,
-        2 + (index % 4) * 0.6,
-      ]);
-      const localX = index * 3.8 - 10;
-      const localZ = Math.sin(index) * 6;
-      this.placeObjectOnTerrain(
-        valley,
-        monolith,
-        valley.position.x + localX,
-        valley.position.z + localZ,
-        monolith.scale.y * 0.5,
-        index * 0.35,
-        0.12,
-      );
-      valley.add(monolith);
-    }
-
-    this.worldRoot.add(valley);
-  }
-
-  private buildSunClearing(): void {
-    const clearing = new THREE.Group();
-    clearing.position.set(4, 0, 22);
-
-    for (let index = 0; index < 8; index += 1) {
-      const cactus = this.props.createCactus(index % 2 === 0 ? '#5d93a5' : '#7eb38e');
-      cactus.scale.setScalar(0.8 + (index % 3) * 0.24);
-      const localX = -16 + index * 4.4;
-      const localZ = Math.sin(index * 0.6) * 7;
-      this.placeObjectOnTerrain(
-        clearing,
-        cactus,
-        clearing.position.x + localX,
-        clearing.position.z + localZ,
-        0,
-        index * 0.44,
-        0.22,
-      );
-      clearing.add(cactus);
-    }
-
-    for (let index = 0; index < 5; index += 1) {
-      const rock = this.props.createCandyRock(index % 2 === 0 ? '#ffd18d' : '#ffab91', [
-        1.6 + index * 0.35,
-        1.4,
-        1.7 + index * 0.4,
-      ]);
-      const localX = -10 + index * 5.5;
-      const localZ = -7 + index * 3.2;
-      this.placeObjectOnTerrain(
-        clearing,
-        rock,
-        clearing.position.x + localX,
-        clearing.position.z + localZ,
-        rock.scale.y * 0.48,
-        index * 0.39,
-        0.26,
-      );
-      clearing.add(rock);
-    }
-
-    this.worldRoot.add(clearing);
-  }
-
-  private buildSilentRocks(): void {
-    const rocks = new THREE.Group();
-    rocks.position.set(-18, 0, 22);
-
-    const layout = [
-      [-8, 6, -4],
-      [-2, 9, 2],
-      [5, 7, -1],
-      [10, 11, 5],
-      [2, 5, 8],
-    ] as const;
-
-    for (const [x, height, z] of layout) {
-      const monolith = this.props.createMonolith('#cfd6ff', [2.1, height, 2.2]);
-      this.placeObjectOnTerrain(
-        rocks,
-        monolith,
-        rocks.position.x + x,
-        rocks.position.z + z,
-        height * 0.5,
-        x * 0.08,
-        0.1,
-      );
-      rocks.add(monolith);
-    }
-
-    this.worldRoot.add(rocks);
   }
 
   private buildClouds(): void {
@@ -423,6 +417,263 @@ export class WorldManager {
     this.sunLight.target.updateMatrixWorld();
   }
 
+  private loadEnvironmentMap(): void {
+    if (this.environmentTexture) {
+      this.scene.environment = this.environmentTexture;
+      return;
+    }
+
+    const loader = new THREE.TextureLoader();
+    loader.load(WorldManager.ENVIRONMENT_MAP_URL, (texture) => {
+      texture.mapping = THREE.EquirectangularReflectionMapping;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.generateMipmaps = true;
+      texture.needsUpdate = true;
+      this.environmentTexture = texture;
+      this.scene.environment = texture;
+    });
+  }
+
+  private loadPlantScatter(): void {
+    if (this.plantScatterRequested) {
+      return;
+    }
+
+    this.plantScatterRequested = true;
+    const loadRequests = WorldManager.CURATED_PLANT_PROFILES.map(
+      (profile) =>
+        new Promise<{ profile: CuratedPlantProfile; scene: THREE.Object3D } | null>((resolve) => {
+          this.plantLoader.load(
+            profile.url,
+            (gltf) => {
+              resolve({ profile, scene: gltf.scene });
+            },
+            undefined,
+            () => {
+              resolve(null);
+            },
+          );
+        }),
+    );
+
+    void Promise.all(loadRequests)
+      .then((results) => {
+        const variants = results.flatMap((result) => {
+          if (!result) {
+            return [];
+          }
+
+          const variant = this.createNormalizedPlantVariant(result.scene);
+          variant.userData.plantBucket = result.profile.bucket;
+          variant.userData.plantScaleMultiplier = result.profile.scale;
+          variant.userData.scatterOnRoute = result.profile.scatterOnRoute === true;
+          return [variant];
+        });
+
+        this.populatePlantScatter(variants);
+      })
+      .catch(() => {
+        /* createNormalizedPlantVariant or loader can throw; keep scatter empty but allow retry */
+      })
+      .finally(() => {
+        this.plantScatterRequested = false;
+      });
+  }
+
+  private populatePlantScatter(variants: THREE.Object3D[]): void {
+    this.plantScatterRoot.clear();
+    if (variants.length === 0) {
+      return;
+    }
+
+    const routeVariants = variants.filter(
+      (variant) =>
+        variant.userData.plantBucket !== 'tall' || variant.userData.scatterOnRoute === true,
+    );
+    let routeVariantCursor = 0;
+    let offRouteVariantCursor = 0;
+
+    const blockedTiles = new Set(
+      JUMP_PADS.map((pad) => `${Math.round(pad.x / BLOCK_UNIT - 0.5)}:${Math.round(pad.z / BLOCK_UNIT - 0.5)}`),
+    );
+
+    for (const tile of PLATFORM_SURFACE_TILES) {
+      if (blockedTiles.has(`${tile.gridX}:${tile.gridZ}`)) {
+        continue;
+      }
+
+      const baseDensity = tile.role === 'spawn' ? 0.34 : tile.role === 'path' ? 0.26 : 0.12;
+      const scatterRoll = this.hashTile(tile.gridX, tile.gridZ, 0.17);
+      if (scatterRoll > baseDensity) {
+        continue;
+      }
+
+      const useRoutePool = tile.role === 'spawn' || tile.role === 'path';
+      const selectionPool = useRoutePool ? routeVariants : variants;
+      const selectionIndex = useRoutePool ? routeVariantCursor : offRouteVariantCursor;
+      const selectedVariant = selectionPool[selectionIndex % selectionPool.length] ?? variants[0];
+      if (useRoutePool) {
+        routeVariantCursor += 1;
+      } else {
+        offRouteVariantCursor += 1;
+      }
+      const plant = selectedVariant.clone(true);
+      const yawStep = Math.floor(this.hashTile(tile.gridX, tile.gridZ, 1.13) * 4);
+      const yaw = yawStep * (Math.PI * 0.5);
+      const authoredScale = typeof plant.userData.plantScaleMultiplier === 'number'
+        ? plant.userData.plantScaleMultiplier
+        : 1;
+      const jitterScale = authoredScale * (0.92 + this.hashTile(tile.gridX, tile.gridZ, 2.91) * 0.08);
+
+      const groundY = this.terrainPhysics.getGroundHeightAt(tile.x, tile.z) ?? tile.topY;
+
+      const meshRoot =
+        plant.getObjectByName(WorldManager.PLANT_MESH_ROOT_NAME) ?? plant.children[0] ?? plant;
+      plant.position.set(0, 0, 0);
+      plant.rotation.set(0, 0, 0);
+      plant.scale.set(1, 1, 1);
+      meshRoot.scale.multiplyScalar(jitterScale);
+      plant.updateMatrixWorld(true);
+
+      // Foot from AABB at yaw=0; Y-rotation preserves vertex Y.
+      const footBounds = new THREE.Box3().setFromObject(plant);
+      let footMinY = footBounds.min.y;
+      if (!Number.isFinite(footMinY)) {
+        footMinY = 0;
+      }
+
+      plant.rotation.y = yaw;
+      const surfaceSink = BLOCK_UNIT * 0.018;
+      plant.position.set(tile.x, groundY - footMinY - surfaceSink, tile.z);
+      plant.updateMatrixWorld(true);
+      this.applyShadowFlags(plant);
+      this.plantScatterRoot.add(plant);
+    }
+  }
+
+  private createNormalizedPlantVariant(source: THREE.Object3D): THREE.Object3D {
+    source.updateWorldMatrix(true, true);
+    const sourceWorldInverse = source.matrixWorld.clone().invert();
+    const sourceWorldPosition = new THREE.Vector3();
+    const sourceWorldQuaternion = new THREE.Quaternion();
+    const sourceWorldScale = new THREE.Vector3();
+    source.matrixWorld.decompose(sourceWorldPosition, sourceWorldQuaternion, sourceWorldScale);
+    const sourceWorldNoTranslation = new THREE.Matrix4().compose(
+      new THREE.Vector3(0, 0, 0),
+      sourceWorldQuaternion,
+      sourceWorldScale,
+    );
+    const meshRoot = new THREE.Group();
+    meshRoot.name = WorldManager.PLANT_MESH_ROOT_NAME;
+
+    source.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh || !(mesh.geometry instanceof THREE.BufferGeometry)) {
+        return;
+      }
+
+      const bakedGeometry = mesh.geometry.clone();
+      const childRelativeToSource = sourceWorldInverse.clone().multiply(mesh.matrixWorld);
+      const bakedMatrix = sourceWorldNoTranslation.clone().multiply(childRelativeToSource);
+      bakedGeometry.applyMatrix4(bakedMatrix);
+      this.ensureUvAttributeOnGeometry(bakedGeometry);
+
+      const bakedMaterial = Array.isArray(mesh.material)
+        ? mesh.material.map((material) => material.clone())
+        : mesh.material.clone();
+      const bakedMesh = new THREE.Mesh(bakedGeometry, bakedMaterial);
+      const materials = Array.isArray(bakedMesh.material) ? bakedMesh.material : [bakedMesh.material];
+      materials.forEach((material) => {
+        material.side = THREE.DoubleSide;
+        material.needsUpdate = true;
+      });
+      bakedMesh.castShadow = true;
+      bakedMesh.receiveShadow = true;
+      meshRoot.add(bakedMesh);
+    });
+
+    meshRoot.updateMatrixWorld(true);
+    const boundsUnscaled = new THREE.Box3().setFromObject(meshRoot);
+    if (boundsUnscaled.isEmpty()) {
+      const pivot = new THREE.Group();
+      pivot.name = WorldManager.PLANT_PIVOT_NAME;
+      pivot.add(meshRoot);
+      return pivot;
+    }
+
+    const size = boundsUnscaled.getSize(new THREE.Vector3());
+    const footprint = Math.max(0.001, Math.max(size.x, size.z));
+    const footprintScale = (BLOCK_UNIT * 0.76) / footprint;
+    const heightScale = (BLOCK_UNIT * 1.02) / Math.max(0.001, size.y);
+    const uniformScale = Math.min(footprintScale, heightScale);
+
+    meshRoot.scale.setScalar(uniformScale);
+    meshRoot.updateMatrixWorld(true);
+
+    const boundsScaled = new THREE.Box3().setFromObject(meshRoot);
+    const boxCenter = boundsScaled.getCenter(new THREE.Vector3());
+    const centerBottom = new THREE.Vector3(boxCenter.x, boundsScaled.min.y, boxCenter.z);
+
+    const pivotRoot = new THREE.Group();
+    pivotRoot.name = WorldManager.PLANT_PIVOT_NAME;
+    pivotRoot.add(meshRoot);
+    meshRoot.position.set(-centerBottom.x, -centerBottom.y, -centerBottom.z);
+
+    pivotRoot.updateMatrixWorld(true);
+    const verify = new THREE.Box3().setFromObject(pivotRoot);
+    // Only snap Y: re-centering XZ on the full AABB shifts asymmetric tufts (purple spike) because
+    // volumetric center ≠ bottom-face center; tile anchor stays at (tile.x, tile.z).
+    if (!verify.isEmpty() && Math.abs(verify.min.y) > 1e-4) {
+      pivotRoot.position.y -= verify.min.y;
+    }
+
+    return pivotRoot;
+  }
+
+  private hashTile(x: number, z: number, seed: number): number {
+    const value = Math.sin(x * 127.1 + z * 311.7 + seed * 91.7) * 43758.5453123;
+    return value - Math.floor(value);
+  }
+
+  private ensureUvAttributeOnGeometry(geometry: THREE.BufferGeometry): void {
+    if (geometry.getAttribute('uv')) {
+      return;
+    }
+
+    geometry.computeBoundingBox();
+    const bounds = geometry.boundingBox;
+    const position = geometry.getAttribute('position');
+    if (!bounds || !position) {
+      return;
+    }
+
+    const size = bounds.getSize(new THREE.Vector3());
+    const useXZ = size.x >= size.y;
+    const width = Math.max(0.001, size.x);
+    const height = Math.max(0.001, useXZ ? size.z : size.y);
+    const uv = new Float32Array(position.count * 2);
+
+    for (let index = 0; index < position.count; index += 1) {
+      const x = position.getX(index);
+      const y = position.getY(index);
+      const z = position.getZ(index);
+      uv[index * 2] = (x - bounds.min.x) / width;
+      uv[index * 2 + 1] = useXZ ? (z - bounds.min.z) / height : (y - bounds.min.y) / height;
+    }
+
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geometry.attributes.uv.needsUpdate = true;
+  }
+
+  private applyShadowFlags(object: THREE.Object3D): void {
+    object.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+  }
+
   private createSkyGradientTexture(): THREE.CanvasTexture {
     const canvas = document.createElement('canvas');
     canvas.width = 32;
@@ -447,27 +698,21 @@ export class WorldManager {
   }
 
   private buildCrystals(): CrystalInstance[] {
-    const placements = [
-      [-8, 8, '#9af6ff'],
-      [-20, -10, '#ffb7fb'],
-      [17, -14, '#84b7ff'],
-      [25, 6, '#98fff1'],
-      [5, 28, '#ffd4ff'],
-      [-14, 24, '#c7f1ff'],
-      [11, 15, '#9bf4ff'],
-    ] as const;
-
-    return placements.map(([x, z, color], index) => {
+    return CRYSTAL_ANCHORS.map(({ x, z, color }, index) => {
       const crystal = this.props.createCrystal(color);
-      this.placeObjectOnTerrain(
-        this.worldRoot,
-        crystal,
-        x,
-        z,
-        1.18,
-        index * 0.73,
-        0.08,
-      );
+      const surfaceSample = this.terrainPhysics.getNearestSpawnSurface(x, z);
+
+      if (surfaceSample) {
+        crystal.position.set(
+          surfaceSample.position.x,
+          surfaceSample.position.y + BLOCK_UNIT * 0.14,
+          surfaceSample.position.z,
+        );
+      } else {
+        crystal.position.set(x, BLOCK_UNIT * 0.14, z);
+      }
+
+      crystal.rotation.set(0, index * 0.73, 0);
       this.worldRoot.add(crystal);
 
       const basePosition = crystal.position.clone();

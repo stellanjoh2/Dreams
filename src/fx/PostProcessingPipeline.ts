@@ -38,11 +38,11 @@ export class PostProcessingPipeline {
     const scenePassNormal = this.scenePass.getTextureNode('normal');
     const scenePassDepth = this.scenePass.getTextureNode('depth');
     this.aoNode = ao(scenePassDepth, scenePassNormal, camera);
-    this.aoNode.radius.value = 1.4;
+    this.aoNode.radius.value = 1.0;
     this.aoNode.samples.value = 8;
-    this.aoNode.thickness.value = 1.2;
+    this.aoNode.thickness.value = 0.85;
     this.aoNode.distanceExponent.value = 1.15;
-    this.aoNode.distanceFallOff.value = 0.6;
+    this.aoNode.distanceFallOff.value = 0.78;
     this.aoNode.scale.value = 1.0;
     this.aoNode.resolutionScale = 0.5;
     this.bloomNode = bloom(
@@ -52,10 +52,15 @@ export class PostProcessingPipeline {
       settings.bloom.threshold,
     );
 
-    const aoFactor = this.aoNode.getTextureNode().r.clamp(0.45, 1);
+    const aoFactor = this.aoNode.getTextureNode().r.clamp(0.68, 1);
     const aoLitColor = scenePassColor.rgb.mul(aoFactor);
     const postBloomColor = aoLitColor.add(this.bloomNode).rgb;
     const contrastedColor = postBloomColor.sub(0.5).mul(this.contrastNode).add(0.5);
+    /**
+     * Do **not** pre-compress “hot” pixels here: a luminance rolloff before saturation was dimming normal
+     * emissive / glow (often luma ~1–2 in HDR) and made them look broken. Contrast+bloom “burn” is
+     * better handled by keeping contrast/saturation in a sane range in FX Studio.
+     */
     const saturatedColor = saturation(contrastedColor, this.saturationNode);
     const vignetteUv = uv().sub(vec2(0.5, 0.5)).mul(1.8);
     const vignetteMask = smoothstep(0.14, 1.05, vignetteUv.dot(vignetteUv)).mul(

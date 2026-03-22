@@ -1,27 +1,22 @@
 import * as THREE from 'three';
-import { FOREGROUND_MOUNDS, PATH_PADS } from './TerrainLayout';
+import { BLOCK_UNIT, JUMP_PADS, MOVING_ELEVATORS, PLATFORM_TILES, getMovingElevatorTopY } from './TerrainLayout';
 
-const SPAWN_SURFACE_MARGIN = 0.82;
+const SURFACE_MARGIN = BLOCK_UNIT * 0.02;
+const SPAWN_MARGIN = BLOCK_UNIT * 0.22;
+const COLLISION_EPSILON = BLOCK_UNIT * 0.045;
+const GROUND_SUPPORT_LIP = BLOCK_UNIT * 0.08;
 
-const sampleEllipsoidTop = (
-  x: number,
-  z: number,
-  cx: number,
-  cy: number,
-  cz: number,
-  rx: number,
-  ry: number,
-  rz: number,
-): number | null => {
-  const dx = (x - cx) / rx;
-  const dz = (z - cz) / rz;
-  const horizontal = 1 - dx * dx - dz * dz;
-
-  if (horizontal <= 0) {
-    return null;
-  }
-
-  return cy + ry * Math.sqrt(horizontal);
+type CollisionSurface = {
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  topY: number;
+  baseY: number;
+  exposedLeft: boolean;
+  exposedRight: boolean;
+  exposedFront: boolean;
+  exposedBack: boolean;
 };
 
 export type TerrainSurfaceSample = {
@@ -31,24 +26,46 @@ export type TerrainSurfaceSample = {
 };
 
 export class TerrainPhysics {
-  getGroundHeightAt(x: number, z: number): number | null {
+  private readonly movingSurfaces: CollisionSurface[] = MOVING_ELEVATORS.map((platform) => ({
+    x: platform.x,
+    z: platform.z,
+    width: platform.width,
+    depth: platform.depth,
+    topY: platform.baseHeightUnits * BLOCK_UNIT,
+    baseY: platform.baseHeightUnits * BLOCK_UNIT - BLOCK_UNIT,
+    exposedLeft: true,
+    exposedRight: true,
+    exposedFront: true,
+    exposedBack: true,
+  }));
+
+  constructor() {
+    this.update(0);
+  }
+
+  update(elapsed: number): void {
+    MOVING_ELEVATORS.forEach((platform, index) => {
+      const topY = getMovingElevatorTopY(elapsed, platform);
+      const surface = this.movingSurfaces[index];
+      surface.topY = topY;
+      surface.baseY = topY - BLOCK_UNIT;
+    });
+  }
+
+  getGroundHeightAt(
+    x: number,
+    z: number,
+    supportRadius = 0,
+    maxHeight = Number.POSITIVE_INFINITY,
+  ): number | null {
     let bestHeight: number | null = null;
 
-    for (const [cx, cy, cz, sx, sy, sz] of FOREGROUND_MOUNDS) {
-      const moundHeight = sampleEllipsoidTop(x, z, cx, cy, cz, sx, sy, sz);
-      if (moundHeight !== null) {
-        bestHeight = bestHeight === null ? moundHeight : Math.max(bestHeight, moundHeight);
-      }
+    for (const tile of PLATFORM_TILES) {
+      bestHeight = this.collectGroundHeight(bestHeight, x, z, supportRadius, maxHeight, tile);
     }
 
-    for (const [cx, cy, cz, sx, sy, sz] of PATH_PADS) {
-      const dx = (x - cx) / (0.55 * sx);
-      const dz = (z - cz) / (0.55 * sz);
-
-      if (dx * dx + dz * dz <= 1) {
-        const padHeight = cy + sy * 0.5;
-        bestHeight = bestHeight === null ? padHeight : Math.max(bestHeight, padHeight);
-      }
+    for (const surface of this.movingSurfaces) {
+      bestHeight = this.collectGroundHeight(bestHeight, x, z, supportRadius, maxHeight, surface);
     }
 
     return bestHeight;
@@ -57,15 +74,8 @@ export class TerrainPhysics {
   getNearestSpawnSurface(x: number, z: number): TerrainSurfaceSample | null {
     let bestSample: TerrainSurfaceSample | null = null;
 
-    for (const [cx, cy, cz, sx, sy, sz] of FOREGROUND_MOUNDS) {
-      const sample = this.sampleMoundSurface(x, z, cx, cy, cz, sx, sy, sz);
-      if (!bestSample || sample.distanceSq < bestSample.distanceSq) {
-        bestSample = sample;
-      }
-    }
-
-    for (const [cx, cy, cz, sx, sy, sz] of PATH_PADS) {
-      const sample = this.samplePadSurface(x, z, cx, cy, cz, sx, sy, sz);
+    for (const tile of PLATFORM_TILES) {
+      const sample = this.sampleSurface(x, z, tile);
       if (!bestSample || sample.distanceSq < bestSample.distanceSq) {
         bestSample = sample;
       }
@@ -75,167 +85,168 @@ export class TerrainPhysics {
   }
 
   resolvePlayerCollisions(position: THREE.Vector3, radius: number, grounded: boolean): void {
-    for (const [cx, cy, cz, sx, sy, sz] of FOREGROUND_MOUNDS) {
-      this.resolveEllipsoidCollision(position, radius, grounded, cx, cy, cz, sx, sy, sz);
+    for (const tile of PLATFORM_TILES) {
+      this.resolveSurfaceCollision(position, radius, grounded, tile);
     }
 
-    for (const [cx, cy, cz, sx, sy, sz] of PATH_PADS) {
-      this.resolvePadCollision(position, radius, grounded, cx, cy, cz, sx, sy, sz);
+    for (const surface of this.movingSurfaces) {
+      this.resolveSurfaceCollision(position, radius, grounded, surface);
     }
   }
 
-  private resolveEllipsoidCollision(
+  getJumpPadImpulse(position: THREE.Vector3, target = new THREE.Vector3()): THREE.Vector3 | null {
+    for (const jumpPad of JUMP_PADS) {
+      if (
+        Math.abs(position.x - jumpPad.x) <= jumpPad.width * 0.5 &&
+        Math.abs(position.z - jumpPad.z) <= jumpPad.depth * 0.5 &&
+        Math.abs(position.y - jumpPad.y) <= BLOCK_UNIT * 0.08
+      ) {
+        return target.set(jumpPad.boostX, jumpPad.boostY, jumpPad.boostZ);
+      }
+    }
+
+    return null;
+  }
+
+  private collectGroundHeight(
+    currentBest: number | null,
+    x: number,
+    z: number,
+    supportRadius: number,
+    maxHeight: number,
+    surface: CollisionSurface,
+  ): number | null {
+    const halfWidth = surface.width * 0.5;
+    const halfDepth = surface.depth * 0.5;
+    const margin = Math.min(SURFACE_MARGIN, halfWidth * 0.06, halfDepth * 0.06);
+
+    if (supportRadius <= 0) {
+      if (
+        surface.topY <= maxHeight + COLLISION_EPSILON &&
+        x >= surface.x - halfWidth + margin &&
+        x <= surface.x + halfWidth - margin &&
+        z >= surface.z - halfDepth + margin &&
+        z <= surface.z + halfDepth - margin
+      ) {
+        return currentBest === null ? surface.topY : Math.max(currentBest, surface.topY);
+      }
+
+      return currentBest;
+    }
+
+    if (
+      surface.topY <= maxHeight + COLLISION_EPSILON &&
+      this.circleOverlapsSurfaceTop(x, z, supportRadius, surface, margin)
+    ) {
+      return currentBest === null ? surface.topY : Math.max(currentBest, surface.topY);
+    }
+
+    return currentBest;
+  }
+
+  private resolveSurfaceCollision(
     position: THREE.Vector3,
     radius: number,
     grounded: boolean,
-    cx: number,
-    cy: number,
-    cz: number,
-    rx: number,
-    ry: number,
-    rz: number,
+    surface: CollisionSurface,
   ): void {
-    if (grounded) {
+    if (position.y >= surface.topY - COLLISION_EPSILON) {
       return;
     }
 
-    const topHeight = sampleEllipsoidTop(position.x, position.z, cx, cy, cz, rx, ry, rz);
-    if (topHeight === null || position.y >= topHeight - 0.15) {
+    if (grounded && position.y >= surface.topY - BLOCK_UNIT * 0.1) {
       return;
     }
 
-    const expandedRx = rx + radius;
-    const expandedRz = rz + radius;
-    let dx = position.x - cx;
-    let dz = position.z - cz;
-
-    if (Math.abs(dx) < 0.0001 && Math.abs(dz) < 0.0001) {
-      dx = 0.0001;
-    }
-
-    const normalized = (dx * dx) / (expandedRx * expandedRx) + (dz * dz) / (expandedRz * expandedRz);
-    if (normalized >= 1) {
+    if (position.y <= surface.baseY - BLOCK_UNIT * 0.12) {
       return;
     }
 
-    const scale = 1 / Math.sqrt(normalized);
-    position.x = cx + dx * scale;
-    position.z = cz + dz * scale;
+    const minX = surface.x - surface.width * 0.5;
+    const maxX = surface.x + surface.width * 0.5;
+    const minZ = surface.z - surface.depth * 0.5;
+    const maxZ = surface.z + surface.depth * 0.5;
+
+    if (
+      position.x < minX - radius ||
+      position.x > maxX + radius ||
+      position.z < minZ - radius ||
+      position.z > maxZ + radius
+    ) {
+      return;
+    }
+
+    const candidates: Array<{ distance: number; axis: 'left' | 'right' | 'front' | 'back' }> = [];
+
+    if (surface.exposedLeft) {
+      candidates.push({ distance: position.x - (minX - radius), axis: 'left' });
+    }
+
+    if (surface.exposedRight) {
+      candidates.push({ distance: maxX + radius - position.x, axis: 'right' });
+    }
+
+    if (surface.exposedFront) {
+      candidates.push({ distance: position.z - (minZ - radius), axis: 'front' });
+    }
+
+    if (surface.exposedBack) {
+      candidates.push({ distance: maxZ + radius - position.z, axis: 'back' });
+    }
+
+    if (candidates.length === 0) {
+      return;
+    }
+
+    let smallest = candidates[0];
+
+    for (let index = 1; index < candidates.length; index += 1) {
+      if (candidates[index].distance < smallest.distance) {
+        smallest = candidates[index];
+      }
+    }
+
+    if (smallest.axis === 'left') {
+      position.x = minX - radius;
+    } else if (smallest.axis === 'right') {
+      position.x = maxX + radius;
+    } else if (smallest.axis === 'front') {
+      position.z = minZ - radius;
+    } else {
+      position.z = maxZ + radius;
+    }
   }
 
-  private resolvePadCollision(
-    position: THREE.Vector3,
-    radius: number,
-    grounded: boolean,
-    cx: number,
-    cy: number,
-    cz: number,
-    sx: number,
-    sy: number,
-    sz: number,
-  ): void {
-    if (grounded) {
-      return;
-    }
-
-    const topHeight = cy + sy * 0.5;
-    if (position.y >= topHeight - 0.08) {
-      return;
-    }
-
-    const expandedRx = 0.55 * sx + radius;
-    const expandedRz = 0.55 * sz + radius;
-    let dx = position.x - cx;
-    let dz = position.z - cz;
-
-    if (Math.abs(dx) < 0.0001 && Math.abs(dz) < 0.0001) {
-      dx = 0.0001;
-    }
-
-    const normalized = (dx * dx) / (expandedRx * expandedRx) + (dz * dz) / (expandedRz * expandedRz);
-    if (normalized >= 1) {
-      return;
-    }
-
-    const scale = 1 / Math.sqrt(normalized);
-    position.x = cx + dx * scale;
-    position.z = cz + dz * scale;
-  }
-
-  private sampleMoundSurface(
-    x: number,
-    z: number,
-    cx: number,
-    cy: number,
-    cz: number,
-    rx: number,
-    ry: number,
-    rz: number,
-  ): TerrainSurfaceSample {
-    const projected = this.projectPointToEllipse(x, z, cx, cz, rx, rz);
-    const y = sampleEllipsoidTop(projected.x, projected.z, cx, cy, cz, rx, ry, rz) ?? cy + ry;
-    const normal = new THREE.Vector3(
-      (projected.x - cx) / (rx * rx),
-      (y - cy) / (ry * ry),
-      (projected.z - cz) / (rz * rz),
-    ).normalize();
+  private sampleSurface(x: number, z: number, surface: CollisionSurface): TerrainSurfaceSample {
+    const halfWidth = surface.width * 0.5;
+    const halfDepth = surface.depth * 0.5;
+    const margin = Math.min(SPAWN_MARGIN, halfWidth * 0.35, halfDepth * 0.35);
+    const sampleX = THREE.MathUtils.clamp(x, surface.x - halfWidth + margin, surface.x + halfWidth - margin);
+    const sampleZ = THREE.MathUtils.clamp(z, surface.z - halfDepth + margin, surface.z + halfDepth - margin);
 
     return {
-      position: new THREE.Vector3(projected.x, y, projected.z),
-      normal,
-      distanceSq: projected.distanceSq,
-    };
-  }
-
-  private samplePadSurface(
-    x: number,
-    z: number,
-    cx: number,
-    cy: number,
-    cz: number,
-    sx: number,
-    sy: number,
-    sz: number,
-  ): TerrainSurfaceSample {
-    const rx = 0.55 * sx;
-    const rz = 0.55 * sz;
-    const projected = this.projectPointToEllipse(x, z, cx, cz, rx, rz);
-
-    return {
-      position: new THREE.Vector3(projected.x, cy + sy * 0.5, projected.z),
+      position: new THREE.Vector3(sampleX, surface.topY, sampleZ),
       normal: new THREE.Vector3(0, 1, 0),
-      distanceSq: projected.distanceSq,
+      distanceSq: (sampleX - x) * (sampleX - x) + (sampleZ - z) * (sampleZ - z),
     };
   }
 
-  private projectPointToEllipse(
+  private circleOverlapsSurfaceTop(
     x: number,
     z: number,
-    cx: number,
-    cz: number,
-    rx: number,
-    rz: number,
-  ): { x: number; z: number; distanceSq: number } {
-    const dx = x - cx;
-    const dz = z - cz;
-    const normalized = (dx * dx) / (rx * rx) + (dz * dz) / (rz * rz);
+    radius: number,
+    surface: CollisionSurface,
+    margin: number,
+  ): boolean {
+    const minX = surface.x - surface.width * 0.5 + margin - GROUND_SUPPORT_LIP;
+    const maxX = surface.x + surface.width * 0.5 - margin + GROUND_SUPPORT_LIP;
+    const minZ = surface.z - surface.depth * 0.5 + margin - GROUND_SUPPORT_LIP;
+    const maxZ = surface.z + surface.depth * 0.5 - margin + GROUND_SUPPORT_LIP;
+    const nearestX = THREE.MathUtils.clamp(x, minX, maxX);
+    const nearestZ = THREE.MathUtils.clamp(z, minZ, maxZ);
+    const deltaX = x - nearestX;
+    const deltaZ = z - nearestZ;
 
-    if (normalized <= SPAWN_SURFACE_MARGIN * SPAWN_SURFACE_MARGIN) {
-      return { x, z, distanceSq: 0 };
-    }
-
-    if (Math.abs(dx) < 0.0001 && Math.abs(dz) < 0.0001) {
-      return { x: cx, z: cz, distanceSq: 0 };
-    }
-
-    const scale = SPAWN_SURFACE_MARGIN / Math.sqrt(normalized);
-    const projectedX = cx + dx * scale;
-    const projectedZ = cz + dz * scale;
-
-    return {
-      x: projectedX,
-      z: projectedZ,
-      distanceSq: (projectedX - x) * (projectedX - x) + (projectedZ - z) * (projectedZ - z),
-    };
+    return deltaX * deltaX + deltaZ * deltaZ <= radius * radius;
   }
 }
