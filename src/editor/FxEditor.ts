@@ -1,0 +1,302 @@
+import type { FxSettings } from '../fx/FxSettings';
+
+type SliderConfig = {
+  key:
+    | 'exposure'
+    | 'contrast'
+    | 'saturation'
+    | 'vignette'
+    | 'bloom.strength'
+    | 'bloom.radius'
+    | 'bloom.threshold'
+    | 'atmosphere.fogDensity'
+    | 'atmosphere.ambientIntensity'
+    | 'atmosphere.hemiIntensity'
+    | 'atmosphere.sunGlow'
+    | 'fresnel.strength'
+    | 'fresnel.radius'
+    | 'movement.walkSpeed'
+    | 'movement.jumpForce'
+    | 'particles.amount'
+    | 'cameraFeel.lookSensitivity'
+    | 'cameraFeel.headBobAmount';
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  format?: (value: number) => string;
+};
+
+const fmt = (value: number, digits = 2): string => value.toFixed(digits);
+
+const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
+  {
+    title: 'Post FX',
+    fields: [
+      { key: 'exposure', label: 'Exposure', min: 0.6, max: 2.5, step: 0.01 },
+      { key: 'contrast', label: 'Contrast', min: 0.6, max: 1.6, step: 0.01 },
+      { key: 'saturation', label: 'Saturation', min: 0.4, max: 1.8, step: 0.01 },
+      { key: 'vignette', label: 'Vignette', min: 0, max: 0.65, step: 0.01 },
+      { key: 'bloom.strength', label: 'Bloom Strength', min: 0, max: 2.8, step: 0.01 },
+      { key: 'bloom.radius', label: 'Bloom Radius', min: 0, max: 1, step: 0.01 },
+      { key: 'bloom.threshold', label: 'Bloom Threshold', min: 0, max: 1.2, step: 0.01 },
+    ],
+  },
+  {
+    title: 'Atmosphere',
+    fields: [
+      {
+        key: 'atmosphere.fogDensity',
+        label: 'Fog Density',
+        min: 0.002,
+        max: 0.04,
+        step: 0.001,
+        format: (value) => value.toFixed(3),
+      },
+      {
+        key: 'atmosphere.ambientIntensity',
+        label: 'Ambient Lift',
+        min: 0,
+        max: 1.8,
+        step: 0.01,
+      },
+      {
+        key: 'atmosphere.hemiIntensity',
+        label: 'Sky Gradient',
+        min: 0,
+        max: 2,
+        step: 0.01,
+      },
+      { key: 'atmosphere.sunGlow', label: 'Sun Glow', min: 0.2, max: 2.5, step: 0.01 },
+    ],
+  },
+  {
+    title: 'Surface',
+    fields: [
+      { key: 'fresnel.strength', label: 'Fresnel Strength', min: 0, max: 0.6, step: 0.01 },
+      { key: 'fresnel.radius', label: 'Fresnel Radius', min: 0.05, max: 1, step: 0.01 },
+    ],
+  },
+  {
+    title: 'Particles',
+    fields: [
+      { key: 'particles.amount', label: 'Particle Amount', min: 0, max: 320, step: 1 },
+    ],
+  },
+  {
+    title: 'Feel',
+    fields: [
+      { key: 'movement.walkSpeed', label: 'Walk Speed', min: 2, max: 10, step: 0.1 },
+      { key: 'movement.jumpForce', label: 'Jump Force', min: 2, max: 8, step: 0.1 },
+      {
+        key: 'cameraFeel.lookSensitivity',
+        label: 'Look Sensitivity',
+        min: 0.001,
+        max: 0.006,
+        step: 0.0001,
+        format: (value) => value.toFixed(4),
+      },
+      {
+        key: 'cameraFeel.headBobAmount',
+        label: 'Head Bob',
+        min: 0,
+        max: 0.12,
+        step: 0.001,
+        format: (value) => value.toFixed(3),
+      },
+    ],
+  },
+];
+
+export class FxEditor {
+  private readonly panel: HTMLDivElement;
+  private readonly inputs = new Map<string, HTMLInputElement>();
+  private readonly values = new Map<string, HTMLSpanElement>();
+  private readonly fresnelColorInput: HTMLInputElement;
+  private readonly particleColorInput: HTMLInputElement;
+  private readonly settings: FxSettings;
+  private readonly onChange: (settings: FxSettings) => void;
+  private readonly onReset: () => void;
+  private open = false;
+
+  constructor(
+    mount: HTMLElement,
+    settings: FxSettings,
+    onChange: (settings: FxSettings) => void,
+    onReset: () => void,
+  ) {
+    this.settings = settings;
+    this.onChange = onChange;
+    this.onReset = onReset;
+    this.panel = document.createElement('div');
+    this.panel.className = 'editor-panel';
+    this.panel.hidden = true;
+    this.panel.innerHTML = `
+      <h2>FX Studio</h2>
+      <p>Hidden editor for tuning bloom, atmosphere, and first-person feel while you walk the world.</p>
+      <div class="editor-grid"></div>
+      <div class="editor-footer">
+        <span>Changes save automatically in this browser.</span>
+        <button class="start-button" type="button">Reset Look</button>
+      </div>
+    `;
+
+    const grid = this.panel.querySelector<HTMLDivElement>('.editor-grid')!;
+    const resetButton = this.panel.querySelector<HTMLButtonElement>('.start-button')!;
+
+    sliderGroups.forEach((group) => {
+      const section = document.createElement('section');
+      section.className = 'editor-group';
+
+      const title = document.createElement('div');
+      title.className = 'editor-group-title';
+      title.textContent = group.title;
+      section.append(title);
+
+      group.fields.forEach((field) => {
+        const wrapper = document.createElement('label');
+        wrapper.className = 'editor-field';
+
+        const label = document.createElement('span');
+        label.className = 'editor-label';
+
+        const name = document.createElement('span');
+        name.textContent = field.label;
+
+        const value = document.createElement('span');
+        value.className = 'editor-value';
+        this.values.set(field.key, value);
+
+        label.append(name, value);
+
+        const input = document.createElement('input');
+        input.className = 'editor-input';
+        input.type = 'range';
+        input.min = String(field.min);
+        input.max = String(field.max);
+        input.step = String(field.step);
+        input.value = String(this.getValue(field.key));
+        input.addEventListener('input', () => {
+          this.setValue(field.key, Number(input.value));
+          value.textContent = (field.format ?? fmt)(Number(input.value));
+          this.onChange(this.settings);
+        });
+
+        value.textContent = (field.format ?? fmt)(Number(input.value));
+
+        this.inputs.set(field.key, input);
+        wrapper.append(label, input);
+        section.append(wrapper);
+      });
+
+      grid.append(section);
+    });
+
+    const fresnelSection = document.createElement('section');
+    fresnelSection.className = 'editor-group';
+
+    const fresnelTitle = document.createElement('div');
+    fresnelTitle.className = 'editor-group-title';
+    fresnelTitle.textContent = 'Fresnel Color';
+
+    const fresnelField = document.createElement('label');
+    fresnelField.className = 'editor-field';
+
+    const fresnelLabel = document.createElement('span');
+    fresnelLabel.className = 'editor-label';
+    fresnelLabel.textContent = 'Edge Tint';
+
+    this.fresnelColorInput = document.createElement('input');
+    this.fresnelColorInput.className = 'editor-input';
+    this.fresnelColorInput.type = 'color';
+    this.fresnelColorInput.value = this.settings.fresnel.color;
+    this.fresnelColorInput.addEventListener('input', () => {
+      this.settings.fresnel.color = this.fresnelColorInput.value;
+      this.onChange(this.settings);
+    });
+
+    fresnelField.append(fresnelLabel, this.fresnelColorInput);
+    fresnelSection.append(fresnelTitle, fresnelField);
+    grid.append(fresnelSection);
+
+    const particleSection = document.createElement('section');
+    particleSection.className = 'editor-group';
+
+    const particleTitle = document.createElement('div');
+    particleTitle.className = 'editor-group-title';
+    particleTitle.textContent = 'Particle Color';
+
+    const particleField = document.createElement('label');
+    particleField.className = 'editor-field';
+
+    const particleLabel = document.createElement('span');
+    particleLabel.className = 'editor-label';
+    particleLabel.textContent = 'Dust Tint';
+
+    this.particleColorInput = document.createElement('input');
+    this.particleColorInput.className = 'editor-input';
+    this.particleColorInput.type = 'color';
+    this.particleColorInput.value = this.settings.particles.color;
+    this.particleColorInput.addEventListener('input', () => {
+      this.settings.particles.color = this.particleColorInput.value;
+      this.onChange(this.settings);
+    });
+
+    particleField.append(particleLabel, this.particleColorInput);
+    particleSection.append(particleTitle, particleField);
+    grid.append(particleSection);
+
+    resetButton.addEventListener('click', () => this.onReset());
+    mount.append(this.panel);
+  }
+
+  toggle(): void {
+    this.open = !this.open;
+    this.panel.hidden = !this.open;
+  }
+
+  get isOpen(): boolean {
+    return this.open;
+  }
+
+  sync(): void {
+    sliderGroups.flatMap((group) => group.fields).forEach((field) => {
+      const value = this.getValue(field.key);
+      const input = this.inputs.get(field.key);
+      const label = this.values.get(field.key);
+
+      if (input) {
+        input.value = String(value);
+      }
+
+      if (label) {
+        label.textContent = (field.format ?? fmt)(value);
+      }
+    });
+
+    this.fresnelColorInput.value = this.settings.fresnel.color;
+    this.particleColorInput.value = this.settings.particles.color;
+  }
+
+  private getValue(key: SliderConfig['key']): number {
+    const path = key.split('.');
+    let value: unknown = this.settings;
+
+    for (const part of path) {
+      value = (value as unknown as Record<string, unknown>)[part];
+    }
+
+    return Number(value);
+  }
+
+  private setValue(key: SliderConfig['key'], nextValue: number): void {
+    const path = key.split('.');
+    let target = this.settings as unknown as Record<string, unknown>;
+
+    for (let index = 0; index < path.length - 1; index += 1) {
+      target = target[path[index]] as Record<string, unknown>;
+    }
+
+    target[path[path.length - 1]] = nextValue;
+  }
+}
