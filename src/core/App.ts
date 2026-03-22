@@ -71,6 +71,7 @@ export class App {
     });
     const crystals = this.world.build(this.settings);
     await this.world.loadCloudPack();
+    await this.world.loadButterflies();
     this.player.respawn(this.world.getRespawnPoint(new THREE.Vector3()));
     this.crystalSystem.setCrystals(crystals);
 

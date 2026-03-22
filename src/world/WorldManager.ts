@@ -6,6 +6,7 @@ import { PropFactory } from './PropFactory';
 import { AmbientDustSystem } from './AmbientDustSystem';
 import { FishSchoolsSystem } from './FishSchoolsSystem';
 import { FishingBoatProp } from './FishingBoatProp';
+import { ButterflyScatterSystem } from './ButterflyScatterSystem';
 import { CactusEnemySystem } from './CactusEnemySystem';
 import { createDistantWorldBackdrop } from './DistantWorldBackdrop';
 import { buildStylizedCloudRing, updateStylizedCloudRing, type OrbitalCloud } from './StylizedCloudRing';
@@ -62,6 +63,7 @@ export class WorldManager {
   private readonly terrainPhysics = new TerrainPhysics();
   private readonly cactusEnemies: CactusEnemySystem;
   private readonly plantLoader = new GLTFLoader();
+  private readonly butterflyScatter: ButterflyScatterSystem;
   private orbitalClouds: OrbitalCloud[] = [];
   private cloudRingGroup?: THREE.Group;
   private readonly sunAnchor = new THREE.Vector3(-32, 42, 84);
@@ -93,6 +95,7 @@ export class WorldManager {
       this.terrainPhysics,
       audioHooks?.playCactusEnemyProximity,
     );
+    this.butterflyScatter = new ButterflyScatterSystem(this.worldRoot, this.plantLoader);
     this.scene.add(this.worldRoot);
 
     for (const anchor of RESPAWN_ANCHORS) {
@@ -143,6 +146,7 @@ export class WorldManager {
 
     this.ambientDust.update(elapsed, camera);
     this.fishSchools.update(delta, elapsed);
+    this.butterflyScatter.update(delta, elapsed);
     this.fishingBoat.update(delta, elapsed);
     this.cactusEnemies.update(delta, elapsed, playerPosition ?? null, camera ?? null);
   }
@@ -373,6 +377,11 @@ export class WorldManager {
     } catch (err) {
       console.warn('[WorldManager] Could not load stylized cloud pack:', err);
     }
+  }
+
+  /** `public/assets/butterflies.glb` — scattered over platform tops (see `ButterflyScatterSystem`). */
+  async loadButterflies(): Promise<void> {
+    await this.butterflyScatter.load();
   }
 
   private placeObjectOnTerrain(

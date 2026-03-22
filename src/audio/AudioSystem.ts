@@ -92,15 +92,19 @@ export class AudioSystem {
       this.context = new AudioContext();
     }
 
-    if (!this.unlockPromise) {
-      this.unlockPromise = this.bootstrapGameplayAudio();
-    }
-
+    // Resume before loading/decoding so `startBackgroundMusicIfNeeded()` sees a running context.
+    // Otherwise bootstrap can finish first, skip BGM while suspended, and never retry.
     if (this.context.state !== 'running') {
       await this.context.resume();
     }
 
+    if (!this.unlockPromise) {
+      this.unlockPromise = this.bootstrapGameplayAudio();
+    }
+
     await this.unlockPromise;
+
+    this.startBackgroundMusicIfNeeded();
   }
 
   /** Load SFX + music once; start looping BGM (idempotent). */
