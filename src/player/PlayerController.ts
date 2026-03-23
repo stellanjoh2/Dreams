@@ -166,15 +166,71 @@ export class PlayerController {
     }
 
     const gravity = this.verticalVelocity > 0 ? 11.9 : 15.6;
+    const wasAirborne = !this.grounded;
     const previousY = this.position.y;
     this.verticalVelocity -= gravity * delta;
-    this.position.y += this.verticalVelocity * delta;
+
+    const vy = this.verticalVelocity;
+    const sweepEndY = previousY + vy * delta;
+
+    /**
+     * Swept landing: if the foot trajectory crosses a platform top this frame, stop **on** the surface
+     * instead of stepping past it and snapping back (removes one-frame clip / “teleport” feel).
+     */
+    const sweepProbeMaxY = Math.max(previousY, sweepEndY) + 0.45;
+    let sweepSupport = getGroundSupportAt(px, pz, supportRadius, sweepProbeMaxY);
+    if (sweepSupport === null) {
+      sweepSupport = getGroundSupportAt(
+        px,
+        pz,
+        this.collisionRadius * PlayerController.GROUND_SUPPORT_RADIUS_BOOST,
+        sweepProbeMaxY,
+      );
+    }
+    const sweepGroundY = sweepSupport?.height ?? null;
+
+    let landedBySweep = false;
+    if (sweepGroundY !== null && vy < 0) {
+      const fromAbove = previousY >= sweepGroundY - PlayerController.LANDING_SNAP_BUFFER;
+      const crossesOrTouchesTop = sweepEndY <= sweepGroundY + 1e-4;
+      if (fromAbove && crossesOrTouchesTop) {
+        landedBySweep = true;
+        this.position.y = sweepGroundY;
+        this.verticalVelocity = 0;
+        this.grounded = true;
+        this.groundGraceTimer = PlayerController.GROUND_GRACE_TIME;
+        if (wasAirborne && vy < -2) {
+          this.landingImpact = Math.max(this.landingImpact, THREE.MathUtils.clamp(-vy / 12, 0, 1));
+          const speedRatio = THREE.MathUtils.clamp(
+            this.horizontalVelocity.length() / Math.max(0.001, settings.movement.walkSpeed),
+            0,
+            settings.movement.runMultiplier,
+          );
+          const runBias = THREE.MathUtils.clamp(
+            (speedRatio - 1) / Math.max(0.01, settings.movement.runMultiplier - 1),
+            0,
+            1,
+          );
+          const impactCarry = THREE.MathUtils.clamp(-vy / 10, 0, 1);
+          this.landingGlide = Math.max(
+            this.landingGlide,
+            THREE.MathUtils.lerp(0.16, 0.48, runBias) * impactCarry,
+          );
+        }
+      }
+    }
+
+    if (!landedBySweep) {
+      this.position.y = sweepEndY;
+    }
+
     resolveTerrainCollisions(
       this.position,
       this.collisionRadius * PlayerController.COLLISION_RESOLVE_RADIUS_MULT,
       this.grounded,
     );
-    /** Wide ceiling so a rising elevator top still counts while falling (old: `previousY + 0.08` missed it). */
+
+    /** Wide probe for grace / ledge logic (not used for the main down-hit; sweep handles that). */
     const landingProbeMaxY =
       Math.max(previousY, this.position.y) +
       Math.max(
@@ -199,6 +255,7 @@ export class PlayerController {
       Math.abs(impactSpeed) * delta + PlayerController.LANDING_SNAP_BUFFER,
     );
     const canSnapToGround =
+      !landedBySweep &&
       groundHeight !== null &&
       impactSpeed <= 0 &&
       previousY >= groundHeight - PlayerController.LANDING_SNAP_BUFFER &&
@@ -211,6 +268,7 @@ export class PlayerController {
      */
     const belowSupportSlack = PlayerController.LANDING_SNAP_BASE + PlayerController.LANDING_SNAP_BUFFER;
     const verticallyAlignedWithSupport =
+      !landedBySweep &&
       groundHeight !== null &&
       impactSpeed <= 0 &&
       this.position.y <= groundHeight + landingSnapDistance &&
