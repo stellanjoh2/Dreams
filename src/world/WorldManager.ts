@@ -5,10 +5,15 @@ import { isFresnelCapableMaterial, updateFresnelMaterial } from '../materials/Fr
 import { PropFactory } from './PropFactory';
 import { AmbientDustSystem } from './AmbientDustSystem';
 import { FishSchoolsSystem } from './FishSchoolsSystem';
-import { FishingBoatProp } from './FishingBoatProp';
+import {
+  FishingBoatProp,
+  FISHING_BOAT_PLACEMENT_LEFT,
+  FISHING_BOAT_PLACEMENT_RIGHT,
+} from './FishingBoatProp';
+import { MountainBackdropProp } from './MountainBackdropProp';
 import { ButterflyScatterSystem } from './ButterflyScatterSystem';
 import { CactusEnemySystem } from './CactusEnemySystem';
-import { createDistantWorldBackdrop } from './DistantWorldBackdrop';
+import { createDistantWorldBackdrop, updateDistantWorldBackdropMotion } from './DistantWorldBackdrop';
 import { buildStylizedCloudRing, updateStylizedCloudRing, type OrbitalCloud } from './StylizedCloudRing';
 import { TerrainGenerator } from './TerrainGenerator';
 import { TerrainPhysics } from './TerrainPhysics';
@@ -58,12 +63,15 @@ export class WorldManager {
   private readonly props = new PropFactory();
   private readonly ambientDust = new AmbientDustSystem();
   private readonly fishSchools = new FishSchoolsSystem(this.worldRoot);
-  private readonly fishingBoat = new FishingBoatProp(this.worldRoot);
+  private readonly fishingBoatRight = new FishingBoatProp(this.worldRoot, FISHING_BOAT_PLACEMENT_RIGHT);
+  private readonly fishingBoatLeft = new FishingBoatProp(this.worldRoot, FISHING_BOAT_PLACEMENT_LEFT);
+  private readonly mountainBackdrop = new MountainBackdropProp(this.worldRoot);
   private readonly terrain = new TerrainGenerator();
   private readonly terrainPhysics = new TerrainPhysics();
   private readonly cactusEnemies: CactusEnemySystem;
   private readonly plantLoader = new GLTFLoader();
   private readonly butterflyScatter: ButterflyScatterSystem;
+  private distantBackdrop: THREE.Group | null = null;
   private orbitalClouds: OrbitalCloud[] = [];
   private cloudRingGroup?: THREE.Group;
   private readonly sunAnchor = new THREE.Vector3(-32, 42, 84);
@@ -117,10 +125,13 @@ export class WorldManager {
     this.buildSkyDome();
     this.buildLights(settings);
     this.buildSun();
-    this.worldRoot.add(createDistantWorldBackdrop());
+    this.distantBackdrop = createDistantWorldBackdrop();
+    this.worldRoot.add(this.distantBackdrop);
     this.worldRoot.add(this.terrain.createGround());
     this.fishSchools.load();
-    this.fishingBoat.load();
+    this.fishingBoatRight.load();
+    this.fishingBoatLeft.load();
+    this.mountainBackdrop.load();
     this.cactusEnemies.load();
     this.worldRoot.add(this.plantScatterRoot);
     this.buildLandmarks();
@@ -135,6 +146,10 @@ export class WorldManager {
 
     this.syncDynamicPlatforms(elapsed);
 
+    if (this.distantBackdrop) {
+      updateDistantWorldBackdropMotion(this.distantBackdrop, elapsed);
+    }
+
     if (this.cloudRingGroup && this.orbitalClouds.length > 0) {
       updateStylizedCloudRing(this.orbitalClouds, this.cloudRingGroup, delta, elapsed);
     }
@@ -147,7 +162,8 @@ export class WorldManager {
     this.ambientDust.update(elapsed, camera);
     this.fishSchools.update(delta, elapsed);
     this.butterflyScatter.update(delta, elapsed);
-    this.fishingBoat.update(delta, elapsed);
+    this.fishingBoatRight.update(delta, elapsed);
+    this.fishingBoatLeft.update(delta, elapsed);
     this.cactusEnemies.update(delta, elapsed, playerPosition ?? null, camera ?? null);
   }
 

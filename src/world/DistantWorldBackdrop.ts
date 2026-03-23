@@ -30,6 +30,17 @@ const TOTAL_SCATTER_INSTANCES = 190;
 /** Extra candy boxes floating **above** the play square (sky clusters). */
 const SKY_CLUSTER_MAX = 55;
 
+/** Share of **sky** backdrop cubes that slowly move up/down (annulus cubes stay static). */
+const SKY_DRIFT_PLACEMENT_CHANCE = 0.14;
+/** Hard cap so we don’t animate too many instanced rows per frame. */
+const SKY_DRIFT_MAX = 12;
+
+/** Total vertical travel (world units), similar scale to small elevator runs. */
+const SKY_DRIFT_TRAVEL_MIN = BLOCK_UNIT * 0.85;
+const SKY_DRIFT_TRAVEL_MAX = BLOCK_UNIT * 2.85;
+const SKY_DRIFT_SPEED_MIN = 0.48;
+const SKY_DRIFT_SPEED_MAX = 0.88;
+
 /** Scales most footprint sizes (blocks) after variant pick — chunky, not needle towers. */
 const FOOTPRINT_SCALE = 1.88;
 
@@ -115,6 +126,16 @@ function computeSquareFrame(inner: AxisRect): SquareFrame {
   const coreOuterR = halfIn + CORE_BAND_BLOCKS * BLOCK_UNIT;
   const farOuterR = coreOuterR + OUTER_RING_BLOCKS * BLOCK_UNIT;
   return { worldCX, worldCZ, halfIn, coreOuterR, farOuterR };
+}
+
+/**
+ * Playfield-centered XZ + outer L∞ radius of the farthest backdrop scatter cells.
+ * Use to park props (e.g. mountains) **outside** instanced candy cubes.
+ */
+export function getBackdropFarFrameMetrics(): { centerX: number; centerZ: number; farOuterR: number } {
+  const inner = computePlayExclusionXZ();
+  const f = computeSquareFrame(inner);
+  return { centerX: f.worldCX, centerZ: f.worldCZ, farOuterR: f.farOuterR };
 }
 
 function chebFromCenter(cx: number, cz: number, frame: SquareFrame): number {
@@ -400,6 +421,33 @@ function buildSizeAttempts(gx: number, gz: number, outerRing: boolean, aerial: b
 
 type BackdropPlacementKind = 'annulus' | 'sky';
 
+export type BackdropSkyDrifter = {
+  mesh: THREE.InstancedMesh;
+  index: number;
+  baseMatrix: THREE.Matrix4;
+  speed: number;
+  phase: number;
+  travelWorld: number;
+};
+
+type PendingSkyDrifter = Omit<BackdropSkyDrifter, 'mesh'> & { colorIndex: number };
+
+const _driftScratchMatrix = new THREE.Matrix4();
+
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
+const smoothstep01 = (v: number): number => {
+  const t = clamp01(v);
+  return t * t * (3 - 2 * t);
+};
+
+/** Same dwell shape as moving elevators (brief pause at each end), centered on the authored position. */
+function skyDriftOffset(elapsed: number, speed: number, phase: number, travelWorld: number): number {
+  const wave = 0.5 + Math.sin(elapsed * speed + phase) * 0.5;
+  const held =
+    wave < 0.14 ? 0 : wave > 0.86 ? 1 : smoothstep01((wave - 0.14) / 0.72);
+  return (held - 0.5) * travelWorld;
+}
+
 /**
  * Place one candy box at (gx,gz) if some footprint size fits without XZ overlap with existing boxes.
  * Annulus: optional low hover above the floor. Sky: stacked band well above the play square.
@@ -413,6 +461,7 @@ function tryPushBackdropInstance(
   placed: XZFootprint[],
   gap: number,
   kind: BackdropPlacementKind,
+  pendingSkyDrifters: PendingSkyDrifter[] | null,
 ): boolean {
   const attempts = buildSizeAttempts(gx, gz, outerRing, kind === 'sky');
 
@@ -471,8 +520,31 @@ function tryPushBackdropInstance(
 
     const c =
       Math.floor(rnd(gx * 1109 + gz * 104729, 15) * BACKDROP_PALETTE.length) % BACKDROP_PALETTE.length;
-    matrices[c].push(dummy.matrix.clone());
+    const baseMatrix = dummy.matrix.clone();
+    matrices[c].push(baseMatrix);
     placed.push(fp);
+
+    if (
+      kind === 'sky' &&
+      pendingSkyDrifters &&
+      pendingSkyDrifters.length < SKY_DRIFT_MAX &&
+      rnd(gx * 1607 + gz * 7937, 420) < SKY_DRIFT_PLACEMENT_CHANCE
+    ) {
+      const travelWorld =
+        SKY_DRIFT_TRAVEL_MIN +
+        rnd(gx * 499 + gz * 307, 421) * (SKY_DRIFT_TRAVEL_MAX - SKY_DRIFT_TRAVEL_MIN);
+      const speed = SKY_DRIFT_SPEED_MIN + rnd(gx + gz * 89, 422) * (SKY_DRIFT_SPEED_MAX - SKY_DRIFT_SPEED_MIN);
+      const phase = rnd(gx * 241 + gz * 173, 423) * Math.PI * 2;
+      pendingSkyDrifters.push({
+        colorIndex: c,
+        index: matrices[c].length - 1,
+        baseMatrix: baseMatrix.clone(),
+        speed,
+        phase,
+        travelWorld,
+      });
+    }
+
     return true;
   }
 
@@ -496,6 +568,7 @@ export function createDistantWorldBackdrop(): THREE.Group {
 
   const matrices: THREE.Matrix4[][] = BACKDROP_PALETTE.map(() => []);
   const placedFootprints: XZFootprint[] = [];
+  const pendingSkyDrifters: PendingSkyDrifter[] = [];
   let placed = 0;
 
   const candidates = collectBandCellsSquare(frame);
@@ -515,6 +588,7 @@ export function createDistantWorldBackdrop(): THREE.Group {
         placedFootprints,
         BOX_SEPARATION_GAP,
         'annulus',
+        null,
       )
     ) {
       placed += 1;
@@ -541,6 +615,7 @@ export function createDistantWorldBackdrop(): THREE.Group {
         placedFootprints,
         BOX_SEPARATION_GAP,
         'sky',
+        pendingSkyDrifters,
       )
     ) {
       skyPlaced += 1;
@@ -549,6 +624,8 @@ export function createDistantWorldBackdrop(): THREE.Group {
       }
     }
   }
+
+  const instancedByColor: (THREE.InstancedMesh | null)[] = new Array(BACKDROP_PALETTE.length).fill(null);
 
   for (let c = 0; c < BACKDROP_PALETTE.length; c += 1) {
     const n = matrices[c].length;
@@ -569,8 +646,39 @@ export function createDistantWorldBackdrop(): THREE.Group {
       mesh.setMatrixAt(i, matrices[c][i]!);
     }
     mesh.instanceMatrix.needsUpdate = true;
+    instancedByColor[c] = mesh;
     root.add(mesh);
   }
 
+  const backdropSkyDrifters: BackdropSkyDrifter[] = [];
+  for (const p of pendingSkyDrifters) {
+    const mesh = instancedByColor[p.colorIndex];
+    if (!mesh) {
+      continue;
+    }
+    const { colorIndex: _c, ...rest } = p;
+    backdropSkyDrifters.push({ ...rest, mesh });
+  }
+  root.userData.backdropSkyDrifters = backdropSkyDrifters;
+
   return root;
+}
+
+/** Vertical motion for a small subset of sky backdrop cubes (see `createDistantWorldBackdrop`). */
+export function updateDistantWorldBackdropMotion(root: THREE.Object3D, elapsed: number): void {
+  const drifters = root.userData.backdropSkyDrifters as BackdropSkyDrifter[] | undefined;
+  if (!drifters || drifters.length === 0) {
+    return;
+  }
+
+  const meshesToRefresh = new Set<THREE.InstancedMesh>();
+  for (const d of drifters) {
+    _driftScratchMatrix.copy(d.baseMatrix);
+    _driftScratchMatrix.elements[13] += skyDriftOffset(elapsed, d.speed, d.phase, d.travelWorld);
+    d.mesh.setMatrixAt(d.index, _driftScratchMatrix);
+    meshesToRefresh.add(d.mesh);
+  }
+  for (const mesh of meshesToRefresh) {
+    mesh.instanceMatrix.needsUpdate = true;
+  }
 }

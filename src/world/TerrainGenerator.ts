@@ -4,8 +4,8 @@ import { WaterSurfaceMesh } from './WaterSurfaceMesh.js';
 import { BLOCK_UNIT, JUMP_PADS, MOVING_ELEVATORS, PLATFORM_TILES, getMovingElevatorTopY } from './TerrainLayout';
 import { WATER_SURFACE_Y, WORLD_FLOOR_Y } from '../config/defaults';
 import { createMetallicFlakeOrmTexture } from '../materials/MetallicFlakeDetail';
+import { getSeaBedRadiusWorld, getWaterSurfaceRadiusWorld } from './worldHorizon';
 
-const WATER_RADIUS = 132;
 const TILE_RENDER_SCALE = BLOCK_UNIT * 1.02;
 const metallicFlakeDetail = createMetallicFlakeOrmTexture(6);
 
@@ -45,14 +45,21 @@ const createWaterNormalTexture = (phase: number): THREE.DataTexture => {
 };
 
 export class TerrainGenerator {
-  private readonly seaBedGeometry = new THREE.CircleGeometry(148, 96);
-  private readonly waterGeometry = new THREE.CircleGeometry(WATER_RADIUS, 192);
+  private readonly seaBedGeometry: THREE.CircleGeometry;
+  private readonly waterGeometry: THREE.CircleGeometry;
   private readonly blockGeometry = new RoundedBoxGeometry(1, 1, 1, 4, 0.048);
   private readonly waterNormal0 = createWaterNormalTexture(0.12);
   private readonly waterNormal1 = createWaterNormalTexture(0.57);
   private readonly blockMaterialCache = new Map<string, THREE.MeshPhysicalMaterial>();
   private readonly elevatorMeshes = new Map<string, THREE.Mesh>();
   private readonly instanceDummy = new THREE.Object3D();
+
+  constructor() {
+    const rWater = getWaterSurfaceRadiusWorld();
+    const rSea = getSeaBedRadiusWorld();
+    this.seaBedGeometry = new THREE.CircleGeometry(rSea, 96);
+    this.waterGeometry = new THREE.CircleGeometry(rWater, 192);
+  }
 
   createGround(): THREE.Group {
     const group = new THREE.Group();

@@ -19,6 +19,13 @@ const TARGET_BUTTERFLY_EXTENT = 1.575;
 
 const BUTTERFLY_COUNT = 13;
 
+/**
+ * `WaterSurface` uses `renderOrder` 12 (see `TerrainGenerator`). GLTF wings are often **transparent**;
+ * those draw in the transparent pass — lower `renderOrder` runs first, so default 0 lets water paint
+ * over butterflies. Keep this strictly greater than the water mesh.
+ */
+const BUTTERFLY_RENDER_ORDER = 20;
+
 const MIN_DIST_CRYSTAL_SQ = 2.85 * 2.85;
 const MIN_DIST_PEER_SQ = 1.55 * 1.55;
 const JUMP_PAD_CLEAR = BLOCK_UNIT * 1.35;
@@ -57,16 +64,23 @@ const BUTTERFLY_EMISSIVE_INTENSITY = 0.42;
 
 function tuneButterflyGraph(object: THREE.Object3D): void {
   object.traverse((child) => {
-    const skinned = child as THREE.SkinnedMesh;
-    if (skinned.isSkinnedMesh) {
-      skinned.frustumCulled = false;
-    }
+    /** Skinned bounds can lag animation; groups are cheap — never cull the scatter. */
+    child.frustumCulled = false;
+
     const mesh = child as THREE.Mesh;
     if (mesh.isMesh) {
       mesh.castShadow = false;
       mesh.receiveShadow = false;
+      mesh.renderOrder = BUTTERFLY_RENDER_ORDER;
       const mats = mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : [];
       for (const mat of mats) {
+        if (!mat) {
+          continue;
+        }
+        /** Wing planes vanish from above / grazing angles if backfaces cull; obvious over transparent water. */
+        mat.side = THREE.DoubleSide;
+        mat.depthTest = true;
+        mat.needsUpdate = true;
         if (
           mat instanceof THREE.MeshStandardMaterial ||
           mat instanceof THREE.MeshPhysicalMaterial ||
@@ -75,7 +89,6 @@ function tuneButterflyGraph(object: THREE.Object3D): void {
         ) {
           mat.emissive.copy(mat.color).multiplyScalar(BUTTERFLY_EMISSIVE_FROM_COLOR);
           mat.emissiveIntensity = BUTTERFLY_EMISSIVE_INTENSITY;
-          mat.needsUpdate = true;
         }
       }
     }
@@ -228,6 +241,7 @@ export class ButterflyScatterSystem {
   constructor(parent: THREE.Object3D, loader: GLTFLoader) {
     this.loader = loader;
     this.root.name = 'ButterflyScatter';
+    this.root.frustumCulled = false;
     parent.add(this.root);
   }
 
@@ -252,6 +266,7 @@ export class ButterflyScatterSystem {
 
             const pivot = new THREE.Group();
             pivot.name = `ButterflyPivot_${index}`;
+            pivot.frustumCulled = false;
             pivot.position.set(spot.x, spot.y, spot.z);
             pivot.add(model);
 

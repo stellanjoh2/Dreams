@@ -18,7 +18,7 @@ export const DEFAULT_FX_SETTINGS: FxSettings = {
     threshold: 0.72,
   },
   atmosphere: {
-    fogDensity: 0.013,
+    fogDensity: 0.04,
     skyColor: '#d5c4ff',
     ambientIntensity: 0.13,
     hemiIntensity: 1.22,

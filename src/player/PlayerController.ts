@@ -6,8 +6,9 @@ import type { InputSystem } from '../input/InputSystem';
 
 export class PlayerController {
   private static readonly GROUND_GRACE_TIME = 0.12;
-  private static readonly STEP_UP_HEIGHT = 0.34;
-  private static readonly STEP_DOWN_SNAP = 0.18;
+  /** Must cover a moving lift rising under the player in one frame (~≤ `BLOCK_UNIT`). */
+  private static readonly STEP_UP_HEIGHT = 0.78;
+  private static readonly STEP_DOWN_SNAP = 0.28;
   private static readonly LANDING_SNAP_BASE = 0.22;
   private static readonly LANDING_SNAP_BUFFER = 0.08;
 
@@ -128,11 +129,18 @@ export class PlayerController {
     this.verticalVelocity -= gravity * delta;
     this.position.y += this.verticalVelocity * delta;
     resolveTerrainCollisions(this.position, this.collisionRadius, this.grounded);
+    /** Wide ceiling so a rising elevator top still counts while falling (old: `previousY + 0.08` missed it). */
+    const landingProbeMaxY =
+      Math.max(previousY, this.position.y) +
+      Math.max(
+        PlayerController.LANDING_SNAP_BASE + PlayerController.LANDING_SNAP_BUFFER,
+        2.35,
+      );
     groundHeight = getGroundHeightAt(
       this.position.x,
       this.position.z,
       supportRadius,
-      previousY + PlayerController.LANDING_SNAP_BUFFER,
+      landingProbeMaxY,
     );
     this.groundGraceTimer = Math.max(0, this.groundGraceTimer - delta);
 

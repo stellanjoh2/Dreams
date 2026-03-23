@@ -5,6 +5,8 @@ const SURFACE_MARGIN = BLOCK_UNIT * 0.02;
 const SPAWN_MARGIN = BLOCK_UNIT * 0.22;
 const COLLISION_EPSILON = BLOCK_UNIT * 0.045;
 const GROUND_SUPPORT_LIP = BLOCK_UNIT * 0.08;
+/** Extra headroom vs `maxHeight` for moving lifts only (rising platform + frame timing). */
+const MOVING_ELEVATOR_MAX_HEIGHT_SLACK = BLOCK_UNIT * 3.6;
 
 type CollisionSurface = {
   x: number;
@@ -17,6 +19,8 @@ type CollisionSurface = {
   exposedRight: boolean;
   exposedFront: boolean;
   exposedBack: boolean;
+  /** Relaxed `maxHeight` ceiling so rising lifts still register when landing / riding up. */
+  isMovingElevator?: boolean;
 };
 
 export type TerrainSurfaceSample = {
@@ -37,6 +41,7 @@ export class TerrainPhysics {
     exposedRight: true,
     exposedFront: true,
     exposedBack: true,
+    isMovingElevator: true,
   }));
 
   constructor() {
@@ -119,10 +124,12 @@ export class TerrainPhysics {
     const halfWidth = surface.width * 0.5;
     const halfDepth = surface.depth * 0.5;
     const margin = Math.min(SURFACE_MARGIN, halfWidth * 0.06, halfDepth * 0.06);
+    const effectiveMaxHeight =
+      maxHeight + (surface.isMovingElevator ? MOVING_ELEVATOR_MAX_HEIGHT_SLACK : 0);
 
     if (supportRadius <= 0) {
       if (
-        surface.topY <= maxHeight + COLLISION_EPSILON &&
+        surface.topY <= effectiveMaxHeight + COLLISION_EPSILON &&
         x >= surface.x - halfWidth + margin &&
         x <= surface.x + halfWidth - margin &&
         z >= surface.z - halfDepth + margin &&
@@ -135,7 +142,7 @@ export class TerrainPhysics {
     }
 
     if (
-      surface.topY <= maxHeight + COLLISION_EPSILON &&
+      surface.topY <= effectiveMaxHeight + COLLISION_EPSILON &&
       this.circleOverlapsSurfaceTop(x, z, supportRadius, surface, margin)
     ) {
       return currentBest === null ? surface.topY : Math.max(currentBest, surface.topY);
@@ -150,11 +157,16 @@ export class TerrainPhysics {
     grounded: boolean,
     surface: CollisionSurface,
   ): void {
-    if (position.y >= surface.topY - COLLISION_EPSILON) {
+    /** Wider band on lifts: avoids treating a descending/landing player as "inside" the block and shoving sideways. */
+    const topBand = surface.isMovingElevator
+      ? COLLISION_EPSILON + BLOCK_UNIT * 0.14
+      : COLLISION_EPSILON;
+    if (position.y >= surface.topY - topBand) {
       return;
     }
 
-    if (grounded && position.y >= surface.topY - BLOCK_UNIT * 0.1) {
+    const groundedTopBand = surface.isMovingElevator ? BLOCK_UNIT * 0.28 : BLOCK_UNIT * 0.1;
+    if (grounded && position.y >= surface.topY - groundedTopBand) {
       return;
     }
 

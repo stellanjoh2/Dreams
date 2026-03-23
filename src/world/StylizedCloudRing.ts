@@ -15,9 +15,12 @@ const RING_OUTER = BLOCK_UNIT * 68;
 /** Keep orbit inside this margin **beyond** platform bounds so clouds rarely sit on top of the player. */
 const ORBIT_CLEARANCE_BEYOND_PLAYFIELD = BLOCK_UNIT * 28;
 
-/** Vertical band above highest platform top. */
-const HEIGHT_MIN_ABOVE_TOP = BLOCK_UNIT * 14;
-const HEIGHT_MAX_ABOVE_TOP = BLOCK_UNIT * 32;
+/**
+ * Vertical band above highest platform top — kept **high** so ring clouds clear bg mountain silhouettes
+ * (same XZ orbit as before; altitude was raised vs the pre-mountain era).
+ */
+const HEIGHT_MIN_ABOVE_TOP = BLOCK_UNIT * 46;
+const HEIGHT_MAX_ABOVE_TOP = BLOCK_UNIT * 74;
 
 /** After normalization each cloud is roughly this big (world units, max axis). */
 const CLOUD_TARGET_SIZE = BLOCK_UNIT * 22;
@@ -43,9 +46,11 @@ const CLOUD_SCALE_MAX_MULT = 1.92;
 const BOB_AMPLITUDE = BLOCK_UNIT * 0.96;
 
 /** Slightly dim albedo so AO crevices read softer; emissive lift adds a flat glow that fills dark patches. */
-const CLOUD_ALBEDO_DIM = 0.87;
-/** Emissive = this fraction × **original** albedo color (before dim); ~few % effective lift. */
-const CLOUD_EMISSIVE_FROM_ALBEDO = 0.085;
+const CLOUD_ALBEDO_AFTER_PRIOR_LIFT = 0.87 + (1 - 0.87) * 0.25;
+/** +50% brighter vs prior: move halfway again from current dim toward full albedo. */
+const CLOUD_ALBEDO_DIM = CLOUD_ALBEDO_AFTER_PRIOR_LIFT + (1 - CLOUD_ALBEDO_AFTER_PRIOR_LIFT) * 0.5;
+/** Emissive = this fraction × **original** albedo color (before dim); +50% vs prior (`0.085 × 1.25 × 1.5`). */
+const CLOUD_EMISSIVE_FROM_ALBEDO = 0.085 * 1.25 * 1.5;
 const BOB_SPEED = 0.18;
 
 /** Smooth turn toward playfield focal point (higher = snappier). */
@@ -311,11 +316,11 @@ export async function buildStylizedCloudRing(
     const radiusBand = inner + (0.35 + 0.6 * rnd(i * 503 + 2)) * (outer - inner);
     const radius = radiusBand;
 
-    // Band was above highest platform; pull halfway toward water surface for a lower sky ceiling.
+    // High band clears mountain silhouettes; blend mostly toward `bandY` (not down to water).
     const bandLow = floorY + HEIGHT_MIN_ABOVE_TOP;
     const bandHigh = floorY + HEIGHT_MAX_ABOVE_TOP;
     const bandY = bandLow + rnd(i * 2203 + 7) * (bandHigh - bandLow);
-    const baseHeight = WATER_SURFACE_Y + 0.5 * (bandY - WATER_SURFACE_Y);
+    const baseHeight = WATER_SURFACE_Y + 0.82 * (bandY - WATER_SURFACE_Y);
     // Upward-only scale variance; square bias → mostly ~1×, occasional big masses.
     const up = rnd(i * 3301 + 11);
     const scaleMult = 1 + up * up * (CLOUD_SCALE_MAX_MULT - 1);

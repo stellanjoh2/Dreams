@@ -13,8 +13,9 @@ const BOAT_EXTRA_OUT = 2;
 
 /**
  * Open water **away** from the south platform edge (white cubes).
+ * **+X** = east/right when looking from spawn toward the map; **−X** mirrors for the west/left boat.
  */
-const BOAT_X = 24 + BOAT_OFFSET_INTO_WATER + BOAT_EXTRA_OUT;
+const BOAT_ANCHOR_X_MAG = 24 + BOAT_OFFSET_INTO_WATER + BOAT_EXTRA_OUT;
 const BOAT_Z = 23.5;
 
 /** Longest axis after fit. */
@@ -129,6 +130,34 @@ function selectBoatAnimationClips(clips: readonly THREE.AnimationClip[]): THREE.
   return matched.length > 0 ? matched : [...clips];
 }
 
+export type FishingBoatPlacement = {
+  /** `Object3D.name` on the root group. */
+  rootName: string;
+  worldX: number;
+  worldZ: number;
+  /** Radians, Y-up. */
+  yaw: number;
+  /** Desync procedural bob vs a twin instance. */
+  bobPhaseOffset?: number;
+};
+
+/** East/right-side boat (original spot). */
+export const FISHING_BOAT_PLACEMENT_RIGHT: FishingBoatPlacement = {
+  rootName: 'FishingBoat',
+  worldX: BOAT_ANCHOR_X_MAG,
+  worldZ: BOAT_Z,
+  yaw: BOAT_YAW,
+};
+
+/** West/left-side boat — mirrored X, yaw + π so the hull still reads toward the playfield. */
+export const FISHING_BOAT_PLACEMENT_LEFT: FishingBoatPlacement = {
+  rootName: 'FishingBoat_West',
+  worldX: -BOAT_ANCHOR_X_MAG,
+  worldZ: BOAT_Z,
+  yaw: BOAT_YAW + Math.PI,
+  bobPhaseOffset: 2.31,
+};
+
 /**
  * Fishing boat: procedural bob + optional GLB clips (e.g. flag) via `AnimationMixer`.
  */
@@ -137,17 +166,23 @@ export class FishingBoatProp {
 
   private readonly loader = new GLTFLoader();
   private readonly motion = new THREE.Group();
+  private readonly bobPhaseOffset: number;
   private mixer: THREE.AnimationMixer | null = null;
   private loaded = false;
 
-  constructor(parent: THREE.Object3D) {
-    this.root.name = 'FishingBoat';
-    this.motion.name = 'FishingBoatMotion';
+  constructor(parent: THREE.Object3D, placement: FishingBoatPlacement) {
+    this.bobPhaseOffset = placement.bobPhaseOffset ?? 0;
+    this.root.name = placement.rootName;
+    this.motion.name = `${placement.rootName}_Motion`;
     this.root.add(this.motion);
 
     /** Pivot slightly below the analytical plane so the visible hull isn’t hovering. */
-    this.root.position.set(BOAT_X, WATER_SURFACE_Y - ROOT_SINK_BELOW_SURFACE, BOAT_Z);
-    this.root.rotation.y = BOAT_YAW;
+    this.root.position.set(
+      placement.worldX,
+      WATER_SURFACE_Y - ROOT_SINK_BELOW_SURFACE,
+      placement.worldZ,
+    );
+    this.root.rotation.y = placement.yaw;
 
     parent.add(this.root);
   }
@@ -200,7 +235,7 @@ export class FishingBoatProp {
     const dt = Math.max(delta, 1 / 1000);
     this.mixer?.update(dt);
 
-    const t = elapsed;
+    const t = elapsed + this.bobPhaseOffset;
     /** Bob stays shallow — large hull + deep bob reads as sorting glitches in the water shader. */
     this.motion.position.y =
       Math.sin(t * 0.85) * 0.032 + Math.sin(t * 0.31 + 0.7) * 0.015;
