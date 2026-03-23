@@ -26,6 +26,8 @@ const MIN_SPAWN_SEPARATION = BLOCK_UNIT * 3.2;
 const PROXIMITY_VOICE_TRIGGER_METERS = BLOCK_UNIT;
 /** Step slightly farther out in XZ before the line can fire again (avoids edge flicker). */
 const PROXIMITY_VOICE_RESET_METERS = BLOCK_UNIT * 1.35;
+/** Idle animation speed while aggro line plays (4× base = 2× the previous 2× “threatened” speed). */
+const AGGRO_IDLE_TIME_SCALE = 4;
 /** Prefer tiles near default spawn so at least one cactus is hearable early (see `PlayerController.position`). */
 const CACTUS_SPAWN_HINT_X = 0;
 const CACTUS_SPAWN_HINT_Z = 12;
@@ -412,7 +414,8 @@ export class CactusEnemySystem {
     if (!player) {
       for (const inst of this.enemies) {
         if (inst.idleAction) {
-          inst.idleAction.timeScale = voiceThreatened && inst === this.aggroFocusInst ? 2 : 1;
+          inst.idleAction.timeScale =
+            voiceThreatened && inst === this.aggroFocusInst ? AGGRO_IDLE_TIME_SCALE : 1;
         }
         inst.mixer.update(dt);
       }
@@ -433,7 +436,8 @@ export class CactusEnemySystem {
 
     for (const inst of this.enemies) {
       if (inst.idleAction) {
-        inst.idleAction.timeScale = voiceThreatened && inst === this.aggroFocusInst ? 2 : 1;
+        inst.idleAction.timeScale =
+          voiceThreatened && inst === this.aggroFocusInst ? AGGRO_IDLE_TIME_SCALE : 1;
       }
       inst.mixer.update(dt);
 
