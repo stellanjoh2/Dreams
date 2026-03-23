@@ -16,7 +16,7 @@ import { CactusEnemySystem } from './CactusEnemySystem';
 import { createDistantWorldBackdrop, updateDistantWorldBackdropMotion } from './DistantWorldBackdrop';
 import { buildStylizedCloudRing, updateStylizedCloudRing, type OrbitalCloud } from './StylizedCloudRing';
 import { TerrainGenerator } from './TerrainGenerator';
-import { TerrainPhysics } from './TerrainPhysics';
+import { TerrainPhysics, type GroundSupportSample } from './TerrainPhysics';
 import {
   BLOCK_UNIT,
   CRYSTAL_ANCHORS,
@@ -261,6 +261,15 @@ export class WorldManager {
 
   getGroundHeightAt(x: number, z: number, supportRadius?: number, maxHeight?: number): number | null {
     return this.terrainPhysics.getGroundHeightAt(x, z, supportRadius, maxHeight);
+  }
+
+  getGroundSupportAt(
+    x: number,
+    z: number,
+    supportRadius?: number,
+    maxHeight?: number,
+  ): GroundSupportSample | null {
+    return this.terrainPhysics.getGroundSupportAt(x, z, supportRadius, maxHeight);
   }
 
   resolveTerrainCollisions(position: THREE.Vector3, radius: number, grounded: boolean): void {

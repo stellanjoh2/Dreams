@@ -1,11 +1,14 @@
 import * as THREE from 'three';
 import {
   AUDIO_CACTUS_ENEMY_PROXIMITY_URLS,
+  AUDIO_CACTUS_PLAYER_DEATH_URLS,
   AUDIO_ELEVATOR_DOWN_URLS,
   AUDIO_ELEVATOR_UP_URLS,
   AUDIO_JUMP_PAD_URLS,
   AUDIO_JUMP_URLS,
   AUDIO_MUSIC_URLS,
+  AUDIO_PLAYER_DROWNING_URLS,
+  DROWNING_SOUND_PHASE_SECONDS,
 } from '../config/audioAssets';
 import { DEFAULT_FX_SETTINGS } from '../config/defaults';
 import type { AudioVolumeSettings } from '../fx/FxSettings';
@@ -23,6 +26,8 @@ const ELEVATOR_UP_GAIN = 0.42;
 const ELEVATOR_DOWN_GAIN = 0.38;
 /** Bus gain for cactus line (stereo SFX bus — not spatial). */
 const CACTUS_ENEMY_PROXIMITY_GAIN = Math.min(1, SFX_GAIN * 2.1);
+const PLAYER_DROWNING_GAIN = Math.min(1, SFX_GAIN * 1.35);
+const CACTUS_PLAYER_DEATH_GAIN = Math.min(1, SFX_GAIN * 1.9);
 
 /** Set `true` to restore elevator up/down SFX (samples or procedural). */
 const ELEVATOR_SFX_ENABLED = false;
@@ -64,6 +69,8 @@ export class AudioSystem {
   private elevatorUpBuffer: AudioBuffer | null = null;
   private elevatorDownBuffer: AudioBuffer | null = null;
   private cactusEnemyProximityBuffer: AudioBuffer | null = null;
+  private playerDrowningBuffer: AudioBuffer | null = null;
+  private cactusPlayerDeathBuffer: AudioBuffer | null = null;
   /** Blocks overlapping cactus aggro lines; drives idle animation “threatened” speed in world. */
   private cactusAggroVoicePlaying = false;
   private musicStarted = false;
@@ -560,16 +567,88 @@ export class AudioSystem {
     };
   }
 
-  /**
-   * Cactus voice when the player enters proximity. Ensures **unlock + decode** (fixes silent failure
-   * when this ran before `AudioContext` was running or before bootstrap finished). Falls back to
-   * `<audio>` if `decodeAudioData` fails for the WAV.
-   */
   /** True while the cactus proximity line is audibly playing (Web Audio or HTML5 fallback). */
   isCactusAggroVoicePlaying(): boolean {
     return this.cactusAggroVoicePlaying;
   }
 
+  /**
+   * Underwater death: drowning SFX for {@link DROWNING_SOUND_PHASE_SECONDS}s (loops if shorter, trims if longer),
+   * then one-shot cactus player death sting.
+   */
+  playDrowningDeathSequence(): void {
+    void (async (): Promise<void> => {
+      await this.unlock();
+      const ctx = this.context;
+      if (!ctx) {
+        return;
+      }
+      if (ctx.state !== 'running') {
+        await ctx.resume().catch(() => {
+          /* */
+        });
+      }
+      if (ctx.state !== 'running') {
+        return;
+      }
+
+      if (!this.playerDrowningBuffer) {
+        this.playerDrowningBuffer = await fetchFirstDecodableUrl(ctx, AUDIO_PLAYER_DROWNING_URLS);
+      }
+      if (!this.cactusPlayerDeathBuffer) {
+        this.cactusPlayerDeathBuffer = await fetchFirstDecodableUrl(ctx, AUDIO_CACTUS_PLAYER_DEATH_URLS);
+      }
+
+      this.ensureSfxBus();
+      const phase = DROWNING_SOUND_PHASE_SECONDS;
+      const t0 = ctx.currentTime;
+      const tDeath = t0 + phase;
+
+      if (this.playerDrowningBuffer) {
+        const buf = this.playerDrowningBuffer;
+        const bus = ctx.createGain();
+        bus.gain.setValueAtTime(PLAYER_DROWNING_GAIN, t0);
+        bus.connect(this.getSfxOutput());
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.loop = buf.duration < phase - 0.02;
+        src.connect(bus);
+        try {
+          src.start(t0);
+          src.stop(tDeath);
+        } catch {
+          bus.disconnect();
+        }
+        src.onended = (): void => {
+          bus.disconnect();
+        };
+      }
+
+      if (this.cactusPlayerDeathBuffer) {
+        const buf = this.cactusPlayerDeathBuffer;
+        const bus = ctx.createGain();
+        bus.gain.setValueAtTime(CACTUS_PLAYER_DEATH_GAIN, tDeath);
+        bus.connect(this.getSfxOutput());
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(bus);
+        try {
+          src.start(tDeath);
+        } catch {
+          bus.disconnect();
+        }
+        src.onended = (): void => {
+          bus.disconnect();
+        };
+      }
+    })();
+  }
+
+  /**
+   * Cactus voice when the player enters proximity. Ensures **unlock + decode** (fixes silent failure
+   * when this ran before `AudioContext` was running or before bootstrap finished). Falls back to
+   * `<audio>` if `decodeAudioData` fails for the WAV.
+   */
   playCactusEnemyProximity(_x: number, _y: number, _z: number): void {
     void (async (): Promise<void> => {
       await this.unlock();

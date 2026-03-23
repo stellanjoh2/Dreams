@@ -29,6 +29,12 @@ export type TerrainSurfaceSample = {
   distanceSq: number;
 };
 
+/** Highest ground under a probe; `fromMovingElevator` when that surface is a lift top. */
+export type GroundSupportSample = {
+  height: number;
+  fromMovingElevator: boolean;
+};
+
 export class TerrainPhysics {
   private readonly movingSurfaces: CollisionSurface[] = MOVING_ELEVATORS.map((platform) => ({
     x: platform.x,
@@ -63,17 +69,45 @@ export class TerrainPhysics {
     supportRadius = 0,
     maxHeight = Number.POSITIVE_INFINITY,
   ): number | null {
+    return this.getGroundSupportAt(x, z, supportRadius, maxHeight)?.height ?? null;
+  }
+
+  /**
+   * Same sampling as {@link getGroundHeightAt}, plus whether the winning surface is a moving elevator
+   * (for a larger allowed step-up in the player controller).
+   */
+  getGroundSupportAt(
+    x: number,
+    z: number,
+    supportRadius = 0,
+    maxHeight = Number.POSITIVE_INFINITY,
+  ): GroundSupportSample | null {
     let bestHeight: number | null = null;
+    let fromMovingElevator = false;
+
+    const consider = (surface: CollisionSurface): void => {
+      const top = this.surfaceGroundTopIfSupported(x, z, supportRadius, maxHeight, surface);
+      if (top === null) {
+        return;
+      }
+      const isEl = !!surface.isMovingElevator;
+      if (bestHeight === null || top > bestHeight) {
+        bestHeight = top;
+        fromMovingElevator = isEl;
+      } else if (top === bestHeight) {
+        fromMovingElevator = fromMovingElevator || isEl;
+      }
+    };
 
     for (const tile of PLATFORM_TILES) {
-      bestHeight = this.collectGroundHeight(bestHeight, x, z, supportRadius, maxHeight, tile);
+      consider(tile);
     }
 
     for (const surface of this.movingSurfaces) {
-      bestHeight = this.collectGroundHeight(bestHeight, x, z, supportRadius, maxHeight, surface);
+      consider(surface);
     }
 
-    return bestHeight;
+    return bestHeight === null ? null : { height: bestHeight, fromMovingElevator };
   }
 
   getNearestSpawnSurface(x: number, z: number): TerrainSurfaceSample | null {
@@ -113,8 +147,8 @@ export class TerrainPhysics {
     return null;
   }
 
-  private collectGroundHeight(
-    currentBest: number | null,
+  /** `surface.topY` if this surface counts as ground under the probe; otherwise `null`. */
+  private surfaceGroundTopIfSupported(
     x: number,
     z: number,
     supportRadius: number,
@@ -135,20 +169,20 @@ export class TerrainPhysics {
         z >= surface.z - halfDepth + margin &&
         z <= surface.z + halfDepth - margin
       ) {
-        return currentBest === null ? surface.topY : Math.max(currentBest, surface.topY);
+        return surface.topY;
       }
 
-      return currentBest;
+      return null;
     }
 
     if (
       surface.topY <= effectiveMaxHeight + COLLISION_EPSILON &&
       this.circleOverlapsSurfaceTop(x, z, supportRadius, surface, margin)
     ) {
-      return currentBest === null ? surface.topY : Math.max(currentBest, surface.topY);
+      return surface.topY;
     }
 
-    return currentBest;
+    return null;
   }
 
   private resolveSurfaceCollision(

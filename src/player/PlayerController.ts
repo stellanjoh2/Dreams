@@ -1,16 +1,23 @@
 import * as THREE from 'three';
+import { DROWNING_SOUND_PHASE_SECONDS } from '../config/audioAssets';
 import { WATER_SURFACE_Y, WORLD_FLOOR_Y } from '../config/defaults';
 import type { FxSettings } from '../fx/FxSettings';
 import type { FirstPersonCamera } from '../camera/FirstPersonCamera';
 import type { InputSystem } from '../input/InputSystem';
+import type { GroundSupportSample } from '../world/TerrainPhysics';
 
 export class PlayerController {
   private static readonly GROUND_GRACE_TIME = 0.12;
-  /** Must cover a moving lift rising under the player in one frame (~≤ `BLOCK_UNIT`). */
-  private static readonly STEP_UP_HEIGHT = 0.78;
-  private static readonly STEP_DOWN_SNAP = 0.28;
+  /** Auto step for static platforms only (curbs); larger ledges need a jump. */
+  private static readonly STEP_UP_HEIGHT = 0.34;
+  /** Moving lifts only — can rise faster than `STEP_UP_HEIGHT` per frame without losing the player. */
+  private static readonly STEP_UP_HEIGHT_MOVING_ELEVATOR = 0.95;
+  private static readonly STEP_DOWN_SNAP = 0.18;
   private static readonly LANDING_SNAP_BASE = 0.22;
   private static readonly LANDING_SNAP_BUFFER = 0.08;
+
+  /** After the death sting starts, keep sinking this long so the tail can play before respawn. */
+  private static readonly DROWNING_POST_DEATH_TAIL_SEC = 2.75;
 
   readonly position = new THREE.Vector3(0, WORLD_FLOOR_Y, 12);
   private readonly collisionRadius = 0.55;
@@ -41,11 +48,20 @@ export class PlayerController {
     input: InputSystem,
     cameraSystem: FirstPersonCamera,
     settings: FxSettings,
-    getGroundHeightAt: (x: number, z: number, supportRadius?: number, maxHeight?: number) => number | null,
+    getGroundSupportAt: (
+      x: number,
+      z: number,
+      supportRadius?: number,
+      maxHeight?: number,
+    ) => GroundSupportSample | null,
     resolveTerrainCollisions: (position: THREE.Vector3, radius: number, grounded: boolean) => void,
     getJumpPadImpulse: (position: THREE.Vector3, target: THREE.Vector3) => THREE.Vector3 | null,
     getRespawnPoint: (target: THREE.Vector3) => THREE.Vector3,
-    audioHooks?: { onPlayerJump?: () => void; onJumpPad?: () => void },
+    audioHooks?: {
+      onPlayerJump?: () => void;
+      onJumpPad?: () => void;
+      onBeginDrowning?: () => void;
+    },
   ): void {
     if (this.drowningTimer > 0) {
       this.updateDrowning(delta, cameraSystem, getRespawnPoint);
@@ -82,19 +98,22 @@ export class PlayerController {
     this.applyHorizontalMovement(delta, running, settings.movement);
     resolveTerrainCollisions(this.position, this.collisionRadius, this.grounded);
     const supportRadius = this.collisionRadius * 0.92;
-    let groundHeight = getGroundHeightAt(
+    const groundProbeMaxY = this.position.y + PlayerController.STEP_UP_HEIGHT;
+    let groundSupport = getGroundSupportAt(
       this.position.x,
       this.position.z,
       supportRadius,
-      this.position.y + PlayerController.STEP_UP_HEIGHT,
+      groundProbeMaxY,
     );
+    let groundHeight = groundSupport?.height ?? null;
+    const maxStepUp =
+      groundSupport?.fromMovingElevator === true
+        ? PlayerController.STEP_UP_HEIGHT_MOVING_ELEVATOR
+        : PlayerController.STEP_UP_HEIGHT;
 
     if (this.grounded && groundHeight !== null) {
       const groundedDelta = groundHeight - this.position.y;
-      if (
-        groundedDelta <= PlayerController.STEP_UP_HEIGHT &&
-        groundedDelta >= -PlayerController.STEP_DOWN_SNAP
-      ) {
+      if (groundedDelta <= maxStepUp && groundedDelta >= -PlayerController.STEP_DOWN_SNAP) {
         this.position.y = groundHeight;
         this.groundGraceTimer = PlayerController.GROUND_GRACE_TIME;
       }
@@ -136,12 +155,13 @@ export class PlayerController {
         PlayerController.LANDING_SNAP_BASE + PlayerController.LANDING_SNAP_BUFFER,
         2.35,
       );
-    groundHeight = getGroundHeightAt(
+    groundSupport = getGroundSupportAt(
       this.position.x,
       this.position.z,
       supportRadius,
       landingProbeMaxY,
     );
+    groundHeight = groundSupport?.height ?? null;
     this.groundGraceTimer = Math.max(0, this.groundGraceTimer - delta);
 
     const impactSpeed = this.verticalVelocity;
@@ -201,7 +221,7 @@ export class PlayerController {
     );
 
     if (groundHeight === null && this.position.y < WORLD_FLOOR_Y - 0.18) {
-      this.beginDrowning();
+      this.beginDrowning(audioHooks);
     }
 
     cameraSystem.updateFromPlayer(
@@ -290,13 +310,20 @@ export class PlayerController {
     this.position.addScaledVector(this.horizontalVelocity, delta);
   }
 
-  private beginDrowning(): void {
-    this.drowningTimer = 3.4;
+  private beginDrowning(
+    audioHooks?: {
+      onPlayerJump?: () => void;
+      onJumpPad?: () => void;
+      onBeginDrowning?: () => void;
+    },
+  ): void {
+    this.drowningTimer = DROWNING_SOUND_PHASE_SECONDS + PlayerController.DROWNING_POST_DEATH_TAIL_SEC;
     this.grounded = false;
     this.verticalVelocity = Math.min(this.verticalVelocity, -1.75);
     this.landingImpact = 0;
     this.landingGlide = 0;
     this.groundGraceTimer = 0;
+    audioHooks?.onBeginDrowning?.();
   }
 
   private updateDrowning(

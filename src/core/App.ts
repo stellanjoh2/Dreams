@@ -215,13 +215,15 @@ export class App {
         this.input,
         this.cameraSystem,
         this.settings,
-        (x, z, supportRadius, maxHeight) => this.world?.getGroundHeightAt(x, z, supportRadius, maxHeight) ?? null,
+        (x, z, supportRadius, maxHeight) =>
+          this.world?.getGroundSupportAt(x, z, supportRadius, maxHeight) ?? null,
         (position, radius, grounded) => this.world?.resolveTerrainCollisions(position, radius, grounded),
         (position, target) => this.world?.getJumpPadImpulse(position, target) ?? null,
         (target) => this.world?.getRespawnPoint(target) ?? target.set(0, 0, 12),
         {
           onPlayerJump: () => this.audio.playJump(),
           onJumpPad: () => this.audio.playJumpPad(),
+          onBeginDrowning: () => this.audio.playDrowningDeathSequence(),
         },
       );
     } else {
