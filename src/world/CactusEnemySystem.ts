@@ -289,6 +289,8 @@ export class CactusEnemySystem {
   private enemies: EnemyInstance[] = [];
   /** After playing, `false` until the player moves beyond `PROXIMITY_VOICE_RESET_METERS` from the nearest cactus. */
   private cactusVoiceArmed = true;
+  /** Cactus that last triggered the aggro line — only his idle runs at 2× while the voice plays. */
+  private aggroFocusInst: EnemyInstance | null = null;
   private readonly scratchWorld = new THREE.Vector3();
   private readonly scratchListener = new THREE.Vector3();
   private readonly scratchLookAt = new THREE.Vector3();
@@ -406,14 +408,16 @@ export class CactusEnemySystem {
     const player = playerWorldPosition;
 
     const voiceThreatened = this.isProximityVoiceActive?.() ?? false;
-    const idleTimeScale = voiceThreatened ? 2 : 1;
 
     if (!player) {
       for (const inst of this.enemies) {
         if (inst.idleAction) {
-          inst.idleAction.timeScale = idleTimeScale;
+          inst.idleAction.timeScale = voiceThreatened && inst === this.aggroFocusInst ? 2 : 1;
         }
         inst.mixer.update(dt);
+      }
+      if (!voiceThreatened) {
+        this.aggroFocusInst = null;
       }
       return;
     }
@@ -425,10 +429,11 @@ export class CactusEnemySystem {
     let voiceX = 0;
     let voiceY = 0;
     let voiceZ = 0;
+    let closestInst: EnemyInstance | null = null;
 
     for (const inst of this.enemies) {
       if (inst.idleAction) {
-        inst.idleAction.timeScale = idleTimeScale;
+        inst.idleAction.timeScale = voiceThreatened && inst === this.aggroFocusInst ? 2 : 1;
       }
       inst.mixer.update(dt);
 
@@ -448,6 +453,7 @@ export class CactusEnemySystem {
 
       if (d < closestDist) {
         closestDist = d;
+        closestInst = inst;
         voiceX = this.scratchWorld.x;
         voiceY = this.scratchWorld.y + TARGET_ENEMY_HEIGHT * 0.55;
         voiceZ = this.scratchWorld.z;
@@ -464,15 +470,24 @@ export class CactusEnemySystem {
       return;
     }
 
+    let setAggroFocusThisFrame = false;
+
     if (closestDist > PROXIMITY_VOICE_RESET_METERS) {
       this.cactusVoiceArmed = true;
     } else if (
       closestDist < PROXIMITY_VOICE_TRIGGER_METERS &&
       this.cactusVoiceArmed &&
-      this.playProximitySound
+      this.playProximitySound &&
+      closestInst
     ) {
+      this.aggroFocusInst = closestInst;
+      setAggroFocusThisFrame = true;
       this.playProximitySound(voiceX, voiceY, voiceZ);
       this.cactusVoiceArmed = false;
+    }
+
+    if (!voiceThreatened && !setAggroFocusThisFrame) {
+      this.aggroFocusInst = null;
     }
   }
 }
