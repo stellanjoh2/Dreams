@@ -9,7 +9,9 @@ import {
 } from './TerrainLayout';
 import type { TerrainPhysics } from './TerrainPhysics';
 
-const MODEL_URL = '/assets/low_poly_cactus_enemy.glb';
+import { publicUrl } from '../config/publicUrl';
+
+const MODEL_URL = publicUrl('assets/low_poly_cactus_enemy.glb');
 
 /** Target height on the tile (~1.5 blocks; was 2× block, then **25% smaller**). */
 const TARGET_ENEMY_HEIGHT = BLOCK_UNIT * 1.05 * 2 * 0.75;

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinnedHierarchy } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { WORLD_FLOOR_Y } from '../config/defaults';
+import { publicUrl } from '../config/publicUrl';
 
 /**
  * Reef fish pack (`school_of_fish.glb`): one scene with several species (e.g. clownfish, blue tang,
@@ -9,7 +10,7 @@ import { WORLD_FLOOR_Y } from '../config/defaults';
  * skinned hierarchy per instance and run a **fresh clip clone** on each `AnimationMixer` so rigs
  * stay independent.
  */
-const MODEL_URL = '/assets/school_of_fish.glb';
+const MODEL_URL = publicUrl('assets/school_of_fish.glb');
 
 /** Below water surface (`WATER_SURFACE_Y` in defaults); tall rig bounds stay submerged. */
 const SWIM_DEPTH_Y = WORLD_FLOOR_Y - 3.92;

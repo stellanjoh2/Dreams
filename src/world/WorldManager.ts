@@ -26,6 +26,7 @@ import {
   RESPAWN_ANCHORS,
 } from './TerrainLayout';
 import type { CrystalInstance } from '../systems/CrystalSystem';
+import { publicUrl } from '../config/publicUrl';
 
 /** Optional hooks from `App` (e.g. Web Audio) — keeps `WorldManager` free of `AudioSystem` import. */
 export type WorldAudioHooks = {
@@ -48,14 +49,19 @@ export class WorldManager {
   private static readonly PLANT_PIVOT_NAME = 'PlantPivot';
   /** Inner group: uniform fit scale + per-tile jitter scale; pivot offset lives here so root scale does not shear the pivot. */
   private static readonly PLANT_MESH_ROOT_NAME = 'PlantMeshRoot';
-  private static readonly ENVIRONMENT_MAP_URL = '/hdri/MR_EXT-010_BlueEndDayPinkClouds_Moorea_4k.png';
+  private static readonly ENVIRONMENT_MAP_URL = publicUrl('hdri/MR_EXT-010_BlueEndDayPinkClouds_Moorea_4k.png');
   private static readonly CURATED_PLANT_PROFILES: readonly CuratedPlantProfile[] = [
-    { url: '/plants/curated/candy-bloom-a.glb', bucket: 'balanced', scale: 1.18 },
-    { url: '/plants/curated/candy-bloom-b.glb', bucket: 'balanced', scale: 1.08 },
-    { url: '/plants/curated/candy-shrub-a.glb', bucket: 'balanced', scale: 1.12 },
-    { url: '/plants/curated/candy-shrub-b.glb', bucket: 'balanced', scale: 1.04 },
+    { url: publicUrl('plants/curated/candy-bloom-a.glb'), bucket: 'balanced', scale: 1.18 },
+    { url: publicUrl('plants/curated/candy-bloom-b.glb'), bucket: 'balanced', scale: 1.08 },
+    { url: publicUrl('plants/curated/candy-shrub-a.glb'), bucket: 'balanced', scale: 1.12 },
+    { url: publicUrl('plants/curated/candy-shrub-b.glb'), bucket: 'balanced', scale: 1.04 },
     // Purple spike only for tall bucket (replaces spike-a / spike-b); allowed on main path so it shows on the map.
-    { url: '/plants/curated/candy-spike-purple.glb', bucket: 'tall', scale: 0.96, scatterOnRoute: true },
+    {
+      url: publicUrl('plants/curated/candy-spike-purple.glb'),
+      bucket: 'tall',
+      scale: 0.96,
+      scatterOnRoute: true,
+    },
   ];
 
   private readonly worldRoot = new THREE.Group();

@@ -3,7 +3,9 @@ import type { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { WATER_SURFACE_Y } from '../config/defaults';
 import { BLOCK_UNIT, PLATFORM_TILES } from './TerrainLayout';
 
-const CLOUD_PACK_URL = '/assets/stylized_clouds_pack_vol_01.glb';
+import { publicUrl } from '../config/publicUrl';
+
+const CLOUD_PACK_URL = publicUrl('assets/stylized_clouds_pack_vol_01.glb');
 
 /** Few large masses — not dozens of tiny puffs on the ring. */
 const CLOUD_COUNT = 7;

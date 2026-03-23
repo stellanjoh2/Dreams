@@ -9,7 +9,9 @@ import {
   PLATFORM_SURFACE_TILES,
 } from './TerrainLayout';
 
-const MODEL_URL = '/assets/butterflies.glb';
+import { publicUrl } from '../config/publicUrl';
+
+const MODEL_URL = publicUrl('assets/butterflies.glb');
 
 /** Well above platform top so wings/body clear plants and floor geometry. */
 const FLOAT_Y_ABOVE_TOP = BLOCK_UNIT * 2.05;

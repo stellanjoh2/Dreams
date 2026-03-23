@@ -3,7 +3,9 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { WATER_SURFACE_Y } from '../config/defaults';
 import { BLOCK_UNIT } from './TerrainLayout';
 
-const MODEL_URL = '/assets/fishing_boat_stylized.glb';
+import { publicUrl } from '../config/publicUrl';
+
+const MODEL_URL = publicUrl('assets/fishing_boat_stylized.glb');
 
 /** Push **3 platform cube widths** (+X) farther into open water vs the prior spot (avoids hull clipping tiles). */
 const BOAT_OFFSET_INTO_WATER = 3 * BLOCK_UNIT;

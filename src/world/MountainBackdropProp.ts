@@ -9,7 +9,9 @@ import {
   MOUNTAIN_SPAWN_EXTRA_MARGIN_BLOCKS,
 } from './worldHorizon';
 
-const MODEL_URL = '/assets/low_poly_mountains.glb';
+import { publicUrl } from '../config/publicUrl';
+
+const MODEL_URL = publicUrl('assets/low_poly_mountains.glb');
 
 const BASE_TARGET_MAX_EXTENT = MOUNTAIN_BASE_TARGET_EXTENT;
 
