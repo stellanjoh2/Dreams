@@ -5,6 +5,8 @@ const SURFACE_MARGIN = BLOCK_UNIT * 0.02;
 const SPAWN_MARGIN = BLOCK_UNIT * 0.22;
 const COLLISION_EPSILON = BLOCK_UNIT * 0.045;
 const GROUND_SUPPORT_LIP = BLOCK_UNIT * 0.08;
+/** Extra XZ reach for 1×1 tops so the foot circle still registers near edges/corners. */
+const NARROW_TILE_EXTRA_LIP = BLOCK_UNIT * 0.2;
 /** Extra headroom vs `maxHeight` for moving lifts only (rising platform + frame timing). */
 const MOVING_ELEVATOR_MAX_HEIGHT_SLACK = BLOCK_UNIT * 3.6;
 
@@ -124,12 +126,16 @@ export class TerrainPhysics {
   }
 
   resolvePlayerCollisions(position: THREE.Vector3, radius: number, grounded: boolean): void {
-    for (const tile of PLATFORM_TILES) {
-      this.resolveSurfaceCollision(position, radius, grounded, tile);
-    }
+    /** Multiple passes: one axis resolve can re-penetrate another face (common at 1×1 corners / seams). */
+    const passes = grounded ? 3 : 2;
+    for (let p = 0; p < passes; p += 1) {
+      for (const tile of PLATFORM_TILES) {
+        this.resolveSurfaceCollision(position, radius, grounded, tile);
+      }
 
-    for (const surface of this.movingSurfaces) {
-      this.resolveSurfaceCollision(position, radius, grounded, surface);
+      for (const surface of this.movingSurfaces) {
+        this.resolveSurfaceCollision(position, radius, grounded, surface);
+      }
     }
   }
 
@@ -183,6 +189,11 @@ export class TerrainPhysics {
     }
 
     return null;
+  }
+
+  private groundSupportLipForSurface(surface: CollisionSurface): number {
+    const minDim = Math.min(surface.width, surface.depth);
+    return minDim <= BLOCK_UNIT * 1.02 ? GROUND_SUPPORT_LIP + NARROW_TILE_EXTRA_LIP : GROUND_SUPPORT_LIP;
   }
 
   private resolveSurfaceCollision(
@@ -284,10 +295,11 @@ export class TerrainPhysics {
     surface: CollisionSurface,
     margin: number,
   ): boolean {
-    const minX = surface.x - surface.width * 0.5 + margin - GROUND_SUPPORT_LIP;
-    const maxX = surface.x + surface.width * 0.5 - margin + GROUND_SUPPORT_LIP;
-    const minZ = surface.z - surface.depth * 0.5 + margin - GROUND_SUPPORT_LIP;
-    const maxZ = surface.z + surface.depth * 0.5 - margin + GROUND_SUPPORT_LIP;
+    const lip = this.groundSupportLipForSurface(surface);
+    const minX = surface.x - surface.width * 0.5 + margin - lip;
+    const maxX = surface.x + surface.width * 0.5 - margin + lip;
+    const minZ = surface.z - surface.depth * 0.5 + margin - lip;
+    const maxZ = surface.z + surface.depth * 0.5 - margin + lip;
     const nearestX = THREE.MathUtils.clamp(x, minX, maxX);
     const nearestZ = THREE.MathUtils.clamp(z, minZ, maxZ);
     const deltaX = x - nearestX;

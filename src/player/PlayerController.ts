@@ -18,9 +18,13 @@ export class PlayerController {
 
   /** After the death sting starts, keep sinking this long so the tail can play before respawn. */
   private static readonly DROWNING_POST_DEATH_TAIL_SEC = 2.75;
+  /** Wider foot circle if the normal probe misses narrow 1×1 tops (crack / edge stands). */
+  private static readonly GROUND_SUPPORT_RADIUS_BOOST = 1.18;
 
   readonly position = new THREE.Vector3(0, WORLD_FLOOR_Y, 12);
   private readonly collisionRadius = 0.55;
+  /** Slightly fatten AABB resolution so we don’t squeeze through 1×1 seams after single-axis solves. */
+  private static readonly COLLISION_RESOLVE_RADIUS_MULT = 1.06;
   private readonly spawnPosition = new THREE.Vector3(0, WORLD_FLOOR_Y, 12);
   private readonly respawnTarget = new THREE.Vector3();
 
@@ -42,6 +46,8 @@ export class PlayerController {
   private drowningTimer = 0;
   private groundGraceTimer = 0;
   private speedRatio = 0;
+  /** Jump pad fires once per touch; reset when leaving the pad volume (stops SFX spam). */
+  private jumpPadContactOpen = true;
 
   update(
     delta: number,
@@ -96,15 +102,24 @@ export class PlayerController {
     this.desiredVelocity.copy(this.desiredMove).multiplyScalar(moveSpeed);
 
     this.applyHorizontalMovement(delta, running, settings.movement);
-    resolveTerrainCollisions(this.position, this.collisionRadius, this.grounded);
+    resolveTerrainCollisions(
+      this.position,
+      this.collisionRadius * PlayerController.COLLISION_RESOLVE_RADIUS_MULT,
+      this.grounded,
+    );
     const supportRadius = this.collisionRadius * 0.92;
     const groundProbeMaxY = this.position.y + PlayerController.STEP_UP_HEIGHT;
-    let groundSupport = getGroundSupportAt(
-      this.position.x,
-      this.position.z,
-      supportRadius,
-      groundProbeMaxY,
-    );
+    const px = this.position.x;
+    const pz = this.position.z;
+    let groundSupport = getGroundSupportAt(px, pz, supportRadius, groundProbeMaxY);
+    if (groundSupport === null) {
+      groundSupport = getGroundSupportAt(
+        px,
+        pz,
+        this.collisionRadius * PlayerController.GROUND_SUPPORT_RADIUS_BOOST,
+        groundProbeMaxY,
+      );
+    }
     let groundHeight = groundSupport?.height ?? null;
     const maxStepUp =
       groundSupport?.fromMovingElevator === true
@@ -123,20 +138,27 @@ export class PlayerController {
       const jumpPadBoost = getJumpPadImpulse(this.position, this.jumpPadImpulse);
 
       if (jumpPadBoost) {
-        this.grounded = false;
-        this.verticalVelocity = jumpPadBoost.y;
-        this.horizontalVelocity.x =
-          Math.abs(jumpPadBoost.x) > 0.001
-            ? jumpPadBoost.x
-            : this.horizontalVelocity.x * 0.4;
-        this.horizontalVelocity.z =
-          Math.abs(jumpPadBoost.z) > 0.001
-            ? jumpPadBoost.z
-            : this.horizontalVelocity.z * 0.4;
-        this.landingImpact = 0;
-        this.landingGlide = 0;
-        audioHooks?.onJumpPad?.();
-      } else if (input.consumeJump()) {
+        if (this.jumpPadContactOpen) {
+          this.jumpPadContactOpen = false;
+          this.grounded = false;
+          this.verticalVelocity = jumpPadBoost.y;
+          this.horizontalVelocity.x =
+            Math.abs(jumpPadBoost.x) > 0.001
+              ? jumpPadBoost.x
+              : this.horizontalVelocity.x * 0.4;
+          this.horizontalVelocity.z =
+            Math.abs(jumpPadBoost.z) > 0.001
+              ? jumpPadBoost.z
+              : this.horizontalVelocity.z * 0.4;
+          this.landingImpact = 0;
+          this.landingGlide = 0;
+          audioHooks?.onJumpPad?.();
+        }
+      } else {
+        this.jumpPadContactOpen = true;
+      }
+
+      if (!jumpPadBoost && input.consumeJump()) {
         this.grounded = false;
         this.verticalVelocity = settings.movement.jumpForce;
         audioHooks?.onPlayerJump?.();
@@ -147,7 +169,11 @@ export class PlayerController {
     const previousY = this.position.y;
     this.verticalVelocity -= gravity * delta;
     this.position.y += this.verticalVelocity * delta;
-    resolveTerrainCollisions(this.position, this.collisionRadius, this.grounded);
+    resolveTerrainCollisions(
+      this.position,
+      this.collisionRadius * PlayerController.COLLISION_RESOLVE_RADIUS_MULT,
+      this.grounded,
+    );
     /** Wide ceiling so a rising elevator top still counts while falling (old: `previousY + 0.08` missed it). */
     const landingProbeMaxY =
       Math.max(previousY, this.position.y) +
@@ -155,12 +181,15 @@ export class PlayerController {
         PlayerController.LANDING_SNAP_BASE + PlayerController.LANDING_SNAP_BUFFER,
         2.35,
       );
-    groundSupport = getGroundSupportAt(
-      this.position.x,
-      this.position.z,
-      supportRadius,
-      landingProbeMaxY,
-    );
+    groundSupport = getGroundSupportAt(px, pz, supportRadius, landingProbeMaxY);
+    if (groundSupport === null) {
+      groundSupport = getGroundSupportAt(
+        px,
+        pz,
+        this.collisionRadius * PlayerController.GROUND_SUPPORT_RADIUS_BOOST,
+        landingProbeMaxY,
+      );
+    }
     groundHeight = groundSupport?.height ?? null;
     this.groundGraceTimer = Math.max(0, this.groundGraceTimer - delta);
 
@@ -175,7 +204,19 @@ export class PlayerController {
       previousY >= groundHeight - PlayerController.LANDING_SNAP_BUFFER &&
       this.position.y <= groundHeight + landingSnapDistance;
 
-    if (groundHeight !== null && (this.position.y <= groundHeight || canSnapToGround)) {
+    /**
+     * Never use bare `position.y <= groundHeight`: the landing probe uses a tall `maxHeight`, so
+     * `groundHeight` is the **highest** surface under the feet — standing under a taller neighbor
+     * ledge would otherwise snap you up in one frame (“teleport step”).
+     */
+    const belowSupportSlack = PlayerController.LANDING_SNAP_BASE + PlayerController.LANDING_SNAP_BUFFER;
+    const verticallyAlignedWithSupport =
+      groundHeight !== null &&
+      impactSpeed <= 0 &&
+      this.position.y <= groundHeight + landingSnapDistance &&
+      this.position.y >= groundHeight - belowSupportSlack;
+
+    if (groundHeight !== null && (verticallyAlignedWithSupport || canSnapToGround)) {
       this.position.y = groundHeight;
       if (!this.grounded && impactSpeed < -2) {
         this.landingImpact = Math.max(this.landingImpact, THREE.MathUtils.clamp(-impactSpeed / 12, 0, 1));
@@ -220,8 +261,27 @@ export class PlayerController {
       Math.min(1, delta * 8),
     );
 
-    if (groundHeight === null && this.position.y < WORLD_FLOOR_Y - 0.18) {
-      this.beginDrowning(audioHooks);
+    if (this.drowningTimer <= 0) {
+      const dryProbeMax = this.position.y + PlayerController.STEP_UP_HEIGHT + 0.12;
+      let drySupportProbe = getGroundSupportAt(px, pz, supportRadius, dryProbeMax);
+      if (drySupportProbe === null) {
+        drySupportProbe = getGroundSupportAt(
+          px,
+          pz,
+          this.collisionRadius * PlayerController.GROUND_SUPPORT_RADIUS_BOOST,
+          dryProbeMax,
+        );
+      }
+      const ghDry = drySupportProbe?.height ?? null;
+      /** Feet are on some ground sample under the probe — don’t drown (includes low docks / seabed). */
+      const onSolidFooting =
+        ghDry !== null &&
+        this.position.y <= ghDry + 0.28 &&
+        this.position.y >= ghDry - 0.48;
+      const submergedPastSurface = this.position.y < WATER_SURFACE_Y - 0.006;
+      if (submergedPastSurface && !onSolidFooting) {
+        this.beginDrowning(audioHooks);
+      }
     }
 
     cameraSystem.updateFromPlayer(
@@ -255,6 +315,7 @@ export class PlayerController {
     this.drowningTimer = 0;
     this.groundGraceTimer = PlayerController.GROUND_GRACE_TIME;
     this.speedRatio = 0;
+    this.jumpPadContactOpen = true;
   }
 
   getMovementIntensity(): number {
