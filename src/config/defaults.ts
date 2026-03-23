@@ -28,7 +28,7 @@ export const DEFAULT_FX_SETTINGS: FxSettings = {
     lookSensitivity: 0.0025,
     headBobAmount: 0.045,
     headBobSpeed: 9.4,
-    normalFov: 73,
+    normalFov: 65,
     fastFov: 90,
   },
   fresnel: {

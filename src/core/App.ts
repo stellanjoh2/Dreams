@@ -68,6 +68,7 @@ export class App {
 
     this.world = new WorldManager({
       playCactusEnemyProximity: (x, y, z) => this.audio.playCactusEnemyProximity(x, y, z),
+      isCactusEnemyProximityVoiceActive: () => this.audio.isCactusAggroVoicePlaying(),
     });
     const crystals = this.world.build(this.settings);
     await this.world.loadCloudPack();

@@ -64,6 +64,8 @@ export class AudioSystem {
   private elevatorUpBuffer: AudioBuffer | null = null;
   private elevatorDownBuffer: AudioBuffer | null = null;
   private cactusEnemyProximityBuffer: AudioBuffer | null = null;
+  /** Blocks overlapping cactus aggro lines; drives idle animation “threatened” speed in world. */
+  private cactusAggroVoicePlaying = false;
   private musicStarted = false;
   private bgmGain: GainNode | null = null;
   /** Master gain for all sound effects (not music). */
@@ -563,6 +565,11 @@ export class AudioSystem {
    * when this ran before `AudioContext` was running or before bootstrap finished). Falls back to
    * `<audio>` if `decodeAudioData` fails for the WAV.
    */
+  /** True while the cactus proximity line is audibly playing (Web Audio or HTML5 fallback). */
+  isCactusAggroVoicePlaying(): boolean {
+    return this.cactusAggroVoicePlaying;
+  }
+
   playCactusEnemyProximity(_x: number, _y: number, _z: number): void {
     void (async (): Promise<void> => {
       await this.unlock();
@@ -576,6 +583,10 @@ export class AudioSystem {
         });
       }
       if (ctx.state !== 'running') {
+        return;
+      }
+
+      if (this.cactusAggroVoicePlaying) {
         return;
       }
 
@@ -599,6 +610,10 @@ export class AudioSystem {
       return;
     }
 
+    if (this.cactusAggroVoicePlaying) {
+      return;
+    }
+
     this.ensureSfxBus();
 
     const t = ctx.currentTime;
@@ -609,8 +624,10 @@ export class AudioSystem {
     const source = ctx.createBufferSource();
     source.buffer = buf;
     source.connect(bus);
+    this.cactusAggroVoicePlaying = true;
     source.start(t);
     source.onended = (): void => {
+      this.cactusAggroVoicePlaying = false;
       bus.disconnect();
     };
   }
@@ -624,10 +641,22 @@ export class AudioSystem {
     if (index >= AUDIO_CACTUS_ENEMY_PROXIMITY_URLS.length) {
       return;
     }
+    if (this.cactusAggroVoicePlaying) {
+      return;
+    }
     const el = new Audio(AUDIO_CACTUS_ENEMY_PROXIMITY_URLS[index]);
     el.setAttribute('playsInline', 'true');
     el.volume = Math.min(1, CACTUS_ENEMY_PROXIMITY_GAIN);
+    this.cactusAggroVoicePlaying = true;
+    el.addEventListener(
+      'ended',
+      () => {
+        this.cactusAggroVoicePlaying = false;
+      },
+      { once: true },
+    );
     void el.play().catch(() => {
+      this.cactusAggroVoicePlaying = false;
       this.tryPlayCactusHtml5FromUrlIndex(index + 1);
     });
   }

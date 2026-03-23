@@ -31,6 +31,8 @@ import { publicUrl } from '../config/publicUrl';
 /** Optional hooks from `App` (e.g. Web Audio) — keeps `WorldManager` free of `AudioSystem` import. */
 export type WorldAudioHooks = {
   playCactusEnemyProximity?: (x: number, y: number, z: number) => void;
+  /** True while the cactus aggro line is still playing (idle anim speeds up). */
+  isCactusEnemyProximityVoiceActive?: () => boolean;
 };
 
 type PlantBucket = 'tall' | 'balanced' | 'wide';
@@ -108,6 +110,7 @@ export class WorldManager {
       this.worldRoot,
       this.terrainPhysics,
       audioHooks?.playCactusEnemyProximity,
+      audioHooks?.isCactusEnemyProximityVoiceActive,
     );
     this.butterflyScatter = new ButterflyScatterSystem(this.worldRoot, this.plantLoader);
     this.scene.add(this.worldRoot);

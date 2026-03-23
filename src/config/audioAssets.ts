@@ -44,9 +44,9 @@ export const AUDIO_CACTUS_ENEMY_PROXIMITY_URLS = [
 ] as const;
 
 export const AUDIO_MUSIC_URLS = [
-  // Primary BGM — `public/audio/music/clamshell-beach.mp3`
-  publicUrl('audio/music/clamshell-beach.mp3'),
+  // Primary BGM (first decodable wins) — `in-my-heart` preferred over `clamshell-beach`
   publicUrl('audio/music/in-my-heart.mp3'),
+  publicUrl('audio/music/clamshell-beach.mp3'),
   publicUrl('audio/music/music.ogg'),
   publicUrl('audio/music/music.mp3'),
   publicUrl('audio/music/bgm.ogg'),

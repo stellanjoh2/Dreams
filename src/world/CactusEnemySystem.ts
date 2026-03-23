@@ -285,6 +285,7 @@ export class CactusEnemySystem {
   private readonly loader = new GLTFLoader();
   private readonly terrainPhysics: TerrainPhysics;
   private readonly playProximitySound?: (x: number, y: number, z: number) => void;
+  private readonly isProximityVoiceActive?: () => boolean;
   private enemies: EnemyInstance[] = [];
   /** After playing, `false` until the player moves beyond `PROXIMITY_VOICE_RESET_METERS` from the nearest cactus. */
   private cactusVoiceArmed = true;
@@ -296,9 +297,11 @@ export class CactusEnemySystem {
     parent: THREE.Object3D,
     terrainPhysics: TerrainPhysics,
     playProximitySound?: (x: number, y: number, z: number) => void,
+    isProximityVoiceActive?: () => boolean,
   ) {
     this.terrainPhysics = terrainPhysics;
     this.playProximitySound = playProximitySound;
+    this.isProximityVoiceActive = isProximityVoiceActive;
     this.root.name = 'CactusEnemies';
     parent.add(this.root);
   }
@@ -402,8 +405,14 @@ export class CactusEnemySystem {
     const dt = Math.max(delta, 1 / 1000);
     const player = playerWorldPosition;
 
+    const voiceThreatened = this.isProximityVoiceActive?.() ?? false;
+    const idleTimeScale = voiceThreatened ? 2 : 1;
+
     if (!player) {
       for (const inst of this.enemies) {
+        if (inst.idleAction) {
+          inst.idleAction.timeScale = idleTimeScale;
+        }
         inst.mixer.update(dt);
       }
       return;
@@ -418,6 +427,9 @@ export class CactusEnemySystem {
     let voiceZ = 0;
 
     for (const inst of this.enemies) {
+      if (inst.idleAction) {
+        inst.idleAction.timeScale = idleTimeScale;
+      }
       inst.mixer.update(dt);
 
       inst.root.updateWorldMatrix(true, false);
