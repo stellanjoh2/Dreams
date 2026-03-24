@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import WebGPU from 'three/addons/capabilities/WebGPU.js';
-import { DEFAULT_FX_SETTINGS } from '../config/defaults';
+import { DEFAULT_FX_SETTINGS, ENABLE_EMISSIVE_LENS_FLARE } from '../config/defaults';
 import { FirstPersonCamera } from '../camera/FirstPersonCamera';
 import { RendererCore } from './RendererCore';
 import { WorldManager } from '../world/WorldManager';
@@ -13,7 +13,10 @@ import { AudioSystem } from '../audio/AudioSystem';
 import { PostProcessingPipeline } from '../fx/PostProcessingPipeline';
 import { FX_SETTINGS_STORAGE_KEY, type FxSettings } from '../fx/FxSettings';
 import { FxEditor } from '../editor/FxEditor';
-import { LensFlareOverlay } from '../fx/LensFlareOverlay';
+import { appendJumpPadFlareCandidates } from '../fx/emissiveFlareSources';
+import { LensFlareOverlay, type LensFlareEmissiveCandidate } from '../fx/LensFlareOverlay';
+
+const emissiveFlareScratch: LensFlareEmissiveCandidate[] = [];
 
 const cloneSettings = (): FxSettings => structuredClone(DEFAULT_FX_SETTINGS);
 const USE_POST_PROCESSING = true;
@@ -72,6 +75,7 @@ export class App {
     });
     const crystals = this.world.build(this.settings);
     await this.world.loadCloudPack();
+    await this.world.loadDecorScatter();
     await this.world.loadButterflies();
     this.player.respawn(this.world.getRespawnPoint(new THREE.Vector3()));
     this.crystalSystem.setCrystals(crystals);
@@ -240,12 +244,18 @@ export class App {
       this.postProcessing?.resize(width, height);
     }
 
+    if (ENABLE_EMISSIVE_LENS_FLARE) {
+      emissiveFlareScratch.length = 0;
+      appendJumpPadFlareCandidates(emissiveFlareScratch);
+      this.crystalSystem.appendFlareCandidates(emissiveFlareScratch);
+    }
     this.lensFlare?.update(
       this.cameraSystem.camera,
       this.world.getSunWorldPosition(this.sunPosition),
       width,
       height,
       delta,
+      ENABLE_EMISSIVE_LENS_FLARE ? emissiveFlareScratch : undefined,
     );
     this.rendererCore.prepareFrame();
     if (this.postProcessing) {

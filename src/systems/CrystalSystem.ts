@@ -1,15 +1,22 @@
 import * as THREE from 'three';
+import type { LensFlareEmissiveCandidate } from '../fx/LensFlareOverlay';
 
 export interface CrystalInstance {
   id: string;
-  mesh: THREE.Mesh;
+  instancedMesh: THREE.InstancedMesh;
+  instanceIndex: number;
   basePosition: THREE.Vector3;
   collected: boolean;
   respawnAt: number;
+  rotationY: number;
 }
 
 export class CrystalSystem {
   private readonly crystals: CrystalInstance[] = [];
+  private readonly flareWorld = new THREE.Vector3();
+  private readonly crystalDummy = new THREE.Object3D();
+  private readonly nearestScratch = new THREE.Vector3();
+  private readonly zeroScaleMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
   private elapsed = 0;
 
   setCrystals(crystals: CrystalInstance[]): void {
@@ -20,6 +27,43 @@ export class CrystalSystem {
   update(delta: number): void {
     this.elapsed += delta;
 
+    const touchedMeshes = new Set<THREE.InstancedMesh>();
+
+    for (const crystal of this.crystals) {
+      if (crystal.collected) {
+        continue;
+      }
+
+      crystal.rotationY += delta * 0.9;
+
+      const bobWave = Math.sin(this.elapsed * 1.8 + crystal.basePosition.x * 0.15);
+      const bob = 0.16 + (bobWave * 0.5 + 0.5) * 0.12;
+
+      this.crystalDummy.position.set(crystal.basePosition.x, crystal.basePosition.y + bob, crystal.basePosition.z);
+      this.crystalDummy.rotation.set(
+        0,
+        crystal.rotationY,
+        Math.sin(this.elapsed * 2.2 + crystal.basePosition.z * 0.1) * 0.04,
+      );
+      this.crystalDummy.scale.set(0.58, 0.92, 0.58);
+      this.crystalDummy.updateMatrix();
+
+      crystal.instancedMesh.setMatrixAt(crystal.instanceIndex, this.crystalDummy.matrix);
+      touchedMeshes.add(crystal.instancedMesh);
+
+      const material = crystal.instancedMesh.material;
+      if (material instanceof THREE.MeshPhysicalMaterial) {
+        material.emissiveIntensity = 0.9 + Math.sin(this.elapsed * 8 + crystal.basePosition.x) * 0.45;
+      }
+    }
+
+    for (const mesh of touchedMeshes) {
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  /** Screen-space lens flare picks the best candidate; crystals use animated emissive strength. */
+  appendFlareCandidates(out: LensFlareEmissiveCandidate[]): void {
     for (const crystal of this.crystals) {
       if (crystal.collected) {
         continue;
@@ -27,15 +71,16 @@ export class CrystalSystem {
 
       const bobWave = Math.sin(this.elapsed * 1.8 + crystal.basePosition.x * 0.15);
       const bob = 0.16 + (bobWave * 0.5 + 0.5) * 0.12;
-      crystal.mesh.position.copy(crystal.basePosition);
-      crystal.mesh.position.y += bob;
-      crystal.mesh.rotation.y += delta * 0.9;
-      crystal.mesh.rotation.z = Math.sin(this.elapsed * 2.2 + crystal.basePosition.z * 0.1) * 0.04;
+      this.flareWorld.set(crystal.basePosition.x, crystal.basePosition.y + bob, crystal.basePosition.z);
 
-      const material = crystal.mesh.material;
-      if (material instanceof THREE.MeshPhysicalMaterial) {
-        material.emissiveIntensity = 0.9 + Math.sin(this.elapsed * 8 + crystal.basePosition.x) * 0.45;
-      }
+      const pulse = 0.38 + Math.sin(this.elapsed * 8 + crystal.basePosition.x) * 0.22;
+      out.push({
+        x: this.flareWorld.x,
+        y: this.flareWorld.y,
+        z: this.flareWorld.z,
+        intensity: pulse,
+        color: '#b8fff0',
+      });
     }
   }
 
@@ -48,7 +93,11 @@ export class CrystalSystem {
         continue;
       }
 
-      const distance = crystal.mesh.position.distanceTo(position);
+      const bobWave = Math.sin(this.elapsed * 1.8 + crystal.basePosition.x * 0.15);
+      const bob = 0.16 + (bobWave * 0.5 + 0.5) * 0.12;
+      this.nearestScratch.set(crystal.basePosition.x, crystal.basePosition.y + bob, crystal.basePosition.z);
+
+      const distance = this.nearestScratch.distanceTo(position);
       if (distance < nearestDistance) {
         nearest = crystal;
         nearestDistance = distance;
@@ -60,7 +109,8 @@ export class CrystalSystem {
 
   collect(crystal: CrystalInstance): void {
     crystal.collected = true;
-    crystal.mesh.visible = false;
     crystal.respawnAt = Number.POSITIVE_INFINITY;
+    crystal.instancedMesh.setMatrixAt(crystal.instanceIndex, this.zeroScaleMatrix);
+    crystal.instancedMesh.instanceMatrix.needsUpdate = true;
   }
 }

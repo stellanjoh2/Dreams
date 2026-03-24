@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ParticleSettings } from '../fx/FxSettings';
 
-const DEFAULT_MAX_PARTICLES = 320;
+const DEFAULT_MAX_PARTICLES = 160;
 
 /**
  * World quad scale is multiplied by (distance / this) so specks keep ~constant **screen** thickness
@@ -105,7 +105,7 @@ export class AmbientDustSystem {
     this.mesh.name = 'AmbientDust';
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 0;
-    this.mesh.count = 120;
+    this.mesh.count = 70;
   }
 
   applySettings(settings: ParticleSettings): void {

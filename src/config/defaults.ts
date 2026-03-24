@@ -1,6 +1,12 @@
 import type { FxSettings } from '../fx/FxSettings';
 
 export const APP_TITLE = 'Candy Lands';
+
+/**
+ * Extra lens-flare layer for jump pads / crystals (screen-space DOM + raycasts).
+ * Off by default to save CPU; set `true` in code to re-enable experiments.
+ */
+export const ENABLE_EMISSIVE_LENS_FLARE = false;
 export const PLAYER_EYE_HEIGHT = 1.72;
 export const WORLD_FLOOR_Y = 0;
 
@@ -42,7 +48,7 @@ export const DEFAULT_FX_SETTINGS: FxSettings = {
     jumpForce: 7.15,
   },
   particles: {
-    amount: 140,
+    amount: 70,
     size: 0.04,
     color: '#b9fff4',
   },

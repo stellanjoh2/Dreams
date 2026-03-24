@@ -120,6 +120,25 @@ a {
   opacity: 1;
 }
 
+/* Secondary flare for bright emissive props (jump pads, crystals); slightly smaller core bloom. */
+.lens-flare-root--emissive .lens-flare-halo {
+  width: 168px;
+  height: 168px;
+}
+
+.lens-flare-root--emissive .lens-flare-ring {
+  width: 118px;
+  height: 118px;
+}
+
+.lens-flare-root--emissive .lens-flare-streak--primary {
+  height: 9px;
+}
+
+.lens-flare-root--emissive .lens-flare-streak--secondary {
+  height: 6px;
+}
+
 .lens-flare-dirt,
 .lens-flare-halo,
 .lens-flare-ring,

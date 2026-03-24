@@ -106,7 +106,7 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
   {
     title: 'Particles',
     fields: [
-      { key: 'particles.amount', label: 'Particle Amount', min: 0, max: 320, step: 1 },
+      { key: 'particles.amount', label: 'Particle Amount', min: 0, max: 160, step: 1 },
       {
         key: 'particles.size',
         label: 'Particle Size',

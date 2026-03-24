@@ -34,7 +34,7 @@ const CLOUD_TARGET_SIZE = BLOCK_UNIT * 22;
 const MIN_SIGNIFICANT_MESH_DIM = BLOCK_UNIT * 1.35;
 
 /** At most this many distinct shapes from the pack (largest by world AABB first). */
-const MAX_CLOUD_SHAPES = 10;
+const MAX_CLOUD_SHAPES = 3;
 
 /** Orbit speed (rad/s); positive = counter-clockwise when viewed from +Y. */
 const ORBIT_SPEED = 0.038;

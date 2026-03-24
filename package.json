@@ -8,6 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "plants:pack": "node scripts/pack-curated-plants.mjs",
+    "trees:extract": "node scripts/extract-curated-trees.mjs",
+    "trees:list": "node scripts/extract-curated-trees.mjs --list",
     "gltf:list-animations": "node scripts/list-glb-animations.mjs"
   },
   "devDependencies": {

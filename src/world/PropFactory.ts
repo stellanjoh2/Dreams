@@ -108,7 +108,20 @@ export class PropFactory {
   }
 
   createCrystal(color: string): THREE.Mesh {
-    const material = this.createCandyMaterial(color, {
+    const crystal = new THREE.Mesh(this.crystalGeometry, this.getCrystalMaterial(color));
+    crystal.scale.set(0.58, 0.92, 0.58);
+    crystal.userData.isCrystal = true;
+    this.applyShadowFlags(crystal);
+    return crystal;
+  }
+
+  /** Shared geometry for all crystals; use with {@link getCrystalMaterial}. */
+  getCrystalGeometry(): THREE.BufferGeometry {
+    return this.crystalGeometry;
+  }
+
+  getCrystalMaterial(color: string): THREE.MeshPhysicalMaterial {
+    return this.createCandyMaterial(color, {
       transmission: 0.78,
       roughness: 0.18,
       clearcoat: 1,
@@ -116,12 +129,15 @@ export class PropFactory {
       emissive: toColor(color).multiplyScalar(0.35),
       emissiveIntensity: 1.2,
     });
+  }
 
-    const crystal = new THREE.Mesh(this.crystalGeometry, material);
-    crystal.scale.set(0.58, 0.92, 0.58);
-    crystal.userData.isCrystal = true;
-    this.applyShadowFlags(crystal);
-    return crystal;
+  createCrystalInstancedMesh(color: string, count: number): THREE.InstancedMesh {
+    const mesh = new THREE.InstancedMesh(this.crystalGeometry, this.getCrystalMaterial(color), count);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.userData.isCrystal = true;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
   }
 
   private createCandyMaterial(

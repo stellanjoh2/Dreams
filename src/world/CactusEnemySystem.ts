@@ -16,7 +16,7 @@ const MODEL_URL = publicUrl('assets/low_poly_cactus_enemy.glb');
 /** Target height on the tile (~1.5 blocks; was 2× block, then **25% smaller**). */
 const TARGET_ENEMY_HEIGHT = BLOCK_UNIT * 1.05 * 2 * 0.75;
 
-const ENEMY_TARGET_COUNT = 3;
+const ENEMY_TARGET_COUNT = 2;
 const MIN_SPAWN_SEPARATION = BLOCK_UNIT * 3.2;
 
 /**
@@ -310,7 +310,7 @@ export class CactusEnemySystem {
     parent.add(this.root);
   }
 
-  load(): void {
+  load(blockedDecorTiles: ReadonlySet<string>): void {
     this.loader.load(
       MODEL_URL,
       (gltf) => {
@@ -331,7 +331,11 @@ export class CactusEnemySystem {
 
         const blockedGrid = jumpPadBlockedGridKeys();
         const candidates = PLATFORM_SURFACE_TILES.filter((tile) => {
-          if (blockedGrid.has(`${tile.gridX}:${tile.gridZ}`)) {
+          const key = `${tile.gridX}:${tile.gridZ}`;
+          if (blockedGrid.has(key)) {
+            return false;
+          }
+          if (blockedDecorTiles.has(key)) {
             return false;
           }
           return !tileWouldSpawnPlant(tile);

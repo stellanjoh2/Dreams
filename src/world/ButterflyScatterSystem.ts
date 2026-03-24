@@ -7,6 +7,7 @@ import {
   JUMP_PADS,
   MOVING_ELEVATORS,
   PLATFORM_SURFACE_TILES,
+  surfaceGridKeyFromTile,
 } from './TerrainLayout';
 
 import { publicUrl } from '../config/publicUrl';
@@ -178,7 +179,9 @@ function xzNearCrystal(x: number, z: number): boolean {
   return false;
 }
 
-function collectScatterPositions(): Array<{ x: number; y: number; z: number }> {
+function collectScatterPositions(
+  decorOccupiedSurfaceKeys: ReadonlySet<string>,
+): Array<{ x: number; y: number; z: number }> {
   const tiles = [...PLATFORM_SURFACE_TILES];
   for (let i = tiles.length - 1; i > 0; i -= 1) {
     const j = Math.floor(rnd(i * 7919 + 101) * (i + 1));
@@ -191,6 +194,9 @@ function collectScatterPositions(): Array<{ x: number; y: number; z: number }> {
   outer: for (const tile of tiles) {
     if (placed.length >= BUTTERFLY_COUNT) {
       break;
+    }
+    if (decorOccupiedSurfaceKeys.has(surfaceGridKeyFromTile(tile))) {
+      continue;
     }
     const margin = Math.max(BLOCK_UNIT * 0.22, Math.min(tile.width, tile.depth) * 0.12);
     const halfW = tile.width * 0.5 - margin;
@@ -247,8 +253,8 @@ export class ButterflyScatterSystem {
     parent.add(this.root);
   }
 
-  load(): Promise<void> {
-    const spots = collectScatterPositions();
+  load(decorOccupiedSurfaceKeys: ReadonlySet<string>): Promise<void> {
+    const spots = collectScatterPositions(decorOccupiedSurfaceKeys);
 
     return new Promise((resolve) => {
       this.loader.load(

@@ -18,15 +18,39 @@ import { buildStylizedCloudRing, updateStylizedCloudRing, type OrbitalCloud } fr
 import { TerrainGenerator } from './TerrainGenerator';
 import { TerrainPhysics, type GroundSupportSample } from './TerrainPhysics';
 import {
+  addSurfaceGridKeysForFootprint,
   BLOCK_UNIT,
+  buildSurfaceTileByGridKey,
   CRYSTAL_ANCHORS,
   DECOR_ANCHORS,
+  getClusterCenterSurfaceTile,
+  getClusterSurfaceTileMaxWorldZ,
   JUMP_PADS,
+  listClusterSurfaceTilesNearestFootprintCenterFirst,
+  surfaceTilePassesTreeSpawnClearance,
+  MOVING_ELEVATORS,
+  PLATFORM_CLUSTERS,
   PLATFORM_SURFACE_TILES,
   RESPAWN_ANCHORS,
+  surfaceGridKeyFromTile,
+  surfaceGridKeyFromWorldXZ,
 } from './TerrainLayout';
 import type { CrystalInstance } from '../systems/CrystalSystem';
 import { publicUrl } from '../config/publicUrl';
+import {
+  extractLargeSoloTreeTemplates,
+  isPreferredScatterTreeFromPackName,
+  pickLargestSoloTreeSource,
+} from './treePackFallback';
+
+type GroundScatterPlacement = {
+  variantIndex: number;
+  tileX: number;
+  tileZ: number;
+  groundY: number;
+  yaw: number;
+  jitterScale: number;
+};
 
 /** Optional hooks from `App` (e.g. Web Audio) — keeps `WorldManager` free of `AudioSystem` import. */
 export type WorldAudioHooks = {
@@ -45,6 +69,14 @@ type CuratedPlantProfile = {
   scatterOnRoute?: boolean;
 };
 
+type CuratedTreeProfile = {
+  url: string;
+  /** Extra scale on top of world normalization (hero trees). */
+  scale: number;
+  bucket: PlantBucket;
+  scatterOnRoute?: boolean;
+};
+
 export class WorldManager {
   readonly scene = new THREE.Scene();
   /** Outer group: world position + yaw live here; origin = AABB bottom-face center on the ground (XZ not shifted by volumetric center). */
@@ -52,6 +84,8 @@ export class WorldManager {
   /** Inner group: uniform fit scale + per-tile jitter scale; pivot offset lives here so root scale does not shear the pivot. */
   private static readonly PLANT_MESH_ROOT_NAME = 'PlantMeshRoot';
   private static readonly ENVIRONMENT_MAP_URL = publicUrl('hdri/MR_EXT-010_BlueEndDayPinkClouds_Moorea_4k.png');
+  /** Fallback when `plants/trees-curated/*.glb` are absent — same file the extractor uses. */
+  private static readonly TREE_PACK_URL = publicUrl('assets/stylized_low_poly_trees_pack_02.glb');
   private static readonly CURATED_PLANT_PROFILES: readonly CuratedPlantProfile[] = [
     { url: publicUrl('plants/curated/candy-bloom-a.glb'), bucket: 'balanced', scale: 1.18 },
     { url: publicUrl('plants/curated/candy-bloom-b.glb'), bucket: 'balanced', scale: 1.08 },
@@ -66,8 +100,29 @@ export class WorldManager {
     },
   ];
 
+  /**
+   * Solo GLBs produced by `npm run trees:extract` from the vendor tree pack (see `public/plants/trees-curated/README.md`).
+   */
+  private static readonly CURATED_TREE_PROFILES: readonly CuratedTreeProfile[] = [
+    { url: publicUrl('plants/trees-curated/solo-palm-curved.glb'), scale: 1.12, bucket: 'tall', scatterOnRoute: true },
+    { url: publicUrl('plants/trees-curated/solo-palm-broad.glb'), scale: 1.08, bucket: 'tall', scatterOnRoute: true },
+    { url: publicUrl('plants/trees-curated/solo-palm-generic.glb'), scale: 1.1, bucket: 'tall', scatterOnRoute: true },
+    { url: publicUrl('plants/trees-curated/solo-alien-jelly.glb'), scale: 1.05, bucket: 'tall', scatterOnRoute: true },
+    { url: publicUrl('plants/trees-curated/solo-alien-orb.glb'), scale: 1.06, bucket: 'tall', scatterOnRoute: true },
+    { url: publicUrl('plants/trees-curated/solo-alien-crystal.glb'), scale: 1.04, bucket: 'tall', scatterOnRoute: true },
+    { url: publicUrl('plants/trees-curated/solo-alien-mushroom.glb'), scale: 1.05, bucket: 'tall', scatterOnRoute: true },
+    { url: publicUrl('plants/trees-curated/solo-alien-weird-flora.glb'), scale: 1.07, bucket: 'tall', scatterOnRoute: true },
+  ];
+
+  /** Uniform fit for instanced tree scatter (curated + pack fallback). */
+  private static readonly TREE_SCATTER_NORMALIZE = {
+    footprintTarget: BLOCK_UNIT * 1.52 * 1.5 * 1.25,
+    heightTarget: BLOCK_UNIT * 7.85 * 1.5 * 1.25,
+  } as const;
+
   private readonly worldRoot = new THREE.Group();
   private readonly plantScatterRoot = new THREE.Group();
+  private readonly treeScatterRoot = new THREE.Group();
   private readonly props = new PropFactory();
   private readonly ambientDust = new AmbientDustSystem();
   private readonly fishSchools = new FishSchoolsSystem(this.worldRoot);
@@ -93,7 +148,10 @@ export class WorldManager {
   private sunLightTarget?: THREE.Object3D;
   private coolLight?: THREE.PointLight;
   private environmentTexture?: THREE.Texture;
-  private plantScatterRequested = false;
+  private plantScatterPromise: Promise<void> | null = null;
+  private treeScatterPromise: Promise<void> | null = null;
+  /** At most one scatter prop (plant/tree/crystal/…) per `gridX:gridZ` surface cell. */
+  private readonly decorOccupiedSurfaceKeys = new Set<string>();
   private readonly sunWorldPosition = new THREE.Vector3();
   private readonly respawnPoints: THREE.Vector3[] = [];
   private readonly terrainSnapPosition = new THREE.Vector3();
@@ -103,6 +161,7 @@ export class WorldManager {
   private readonly terrainSnapAlignQuaternion = new THREE.Quaternion();
   private readonly terrainSnapYawQuaternion = new THREE.Quaternion();
   private readonly terrainSnapIdentityQuaternion = new THREE.Quaternion();
+  private readonly crystalLayoutDummy = new THREE.Object3D();
   private nextRespawnIndex = 0;
 
   constructor(audioHooks?: WorldAudioHooks) {
@@ -113,6 +172,7 @@ export class WorldManager {
       audioHooks?.isCactusEnemyProximityVoiceActive,
     );
     this.butterflyScatter = new ButterflyScatterSystem(this.worldRoot, this.plantLoader);
+    this.treeScatterRoot.name = 'TreeScatter';
     this.scene.add(this.worldRoot);
 
     for (const anchor of RESPAWN_ANCHORS) {
@@ -141,13 +201,40 @@ export class WorldManager {
     this.fishingBoatRight.load();
     this.fishingBoatLeft.load();
     this.mountainBackdrop.load();
-    this.cactusEnemies.load();
+    this.seedDecorOccupancyFromWorldProps();
     this.worldRoot.add(this.plantScatterRoot);
+    this.worldRoot.add(this.treeScatterRoot);
     this.buildLandmarks();
     this.worldRoot.add(this.ambientDust.mesh);
     this.ambientDust.applySettings(settings.particles);
 
     return this.buildCrystals();
+  }
+
+  /** Surface cells already used by jump pads, elevators, island decor, crystals, plants, trees (read after `loadDecorScatter`). */
+  getDecorOccupiedSurfaceKeys(): ReadonlySet<string> {
+    return this.decorOccupiedSurfaceKeys;
+  }
+
+  /**
+   * Instanced plants + trees (reserves tiles), then spawns cactus enemies on remaining free tiles.
+   * Call after `build()` and before butterflies so props don’t overlap.
+   */
+  async loadDecorScatter(): Promise<void> {
+    /** Sequential: plants reserve cells first; trees only on free cluster-center cells. */
+    await this.loadPlantScatter();
+    await this.loadTreeScatter();
+    this.cactusEnemies.load(this.decorOccupiedSurfaceKeys);
+  }
+
+  private seedDecorOccupancyFromWorldProps(): void {
+    this.decorOccupiedSurfaceKeys.clear();
+    for (const pad of JUMP_PADS) {
+      addSurfaceGridKeysForFootprint(pad.x, pad.z, pad.width, pad.depth, this.decorOccupiedSurfaceKeys);
+    }
+    for (const lift of MOVING_ELEVATORS) {
+      addSurfaceGridKeysForFootprint(lift.x, lift.z, lift.width, lift.depth, this.decorOccupiedSurfaceKeys);
+    }
   }
 
   update(delta: number, elapsed: number, camera?: THREE.Camera, playerPosition?: THREE.Vector3): void {
@@ -349,7 +436,6 @@ export class WorldManager {
 
   private buildLandmarks(): void {
     this.buildIslandDecor();
-    this.loadPlantScatter();
   }
 
   private buildIslandDecor(): void {
@@ -392,6 +478,7 @@ export class WorldManager {
         anchor.tiltAmount,
       );
       this.worldRoot.add(object);
+      this.decorOccupiedSurfaceKeys.add(surfaceGridKeyFromWorldXZ(anchor.x, anchor.z));
     }
   }
 
@@ -415,7 +502,7 @@ export class WorldManager {
 
   /** `public/assets/butterflies.glb` — scattered over platform tops (see `ButterflyScatterSystem`). */
   async loadButterflies(): Promise<void> {
-    await this.butterflyScatter.load();
+    await this.butterflyScatter.load(this.decorOccupiedSurfaceKeys);
   }
 
   private placeObjectOnTerrain(
@@ -474,62 +561,397 @@ export class WorldManager {
     });
   }
 
-  private loadPlantScatter(): void {
-    if (this.plantScatterRequested) {
-      return;
+  private loadPlantScatter(): Promise<void> {
+    if (this.plantScatterPromise) {
+      return this.plantScatterPromise;
     }
 
-    this.plantScatterRequested = true;
-    const loadRequests = WorldManager.CURATED_PLANT_PROFILES.map(
-      (profile) =>
-        new Promise<{ profile: CuratedPlantProfile; scene: THREE.Object3D } | null>((resolve) => {
+    this.plantScatterPromise = (async () => {
+      const loadRequests = WorldManager.CURATED_PLANT_PROFILES.map(
+        (profile) =>
+          new Promise<{ profile: CuratedPlantProfile; scene: THREE.Object3D } | null>((resolve) => {
+            this.plantLoader.load(
+              profile.url,
+              (gltf) => {
+                resolve({ profile, scene: gltf.scene });
+              },
+              undefined,
+              () => {
+                resolve(null);
+              },
+            );
+          }),
+      );
+
+      const results = await Promise.all(loadRequests);
+      const variants = results.flatMap((result) => {
+        if (!result) {
+          return [];
+        }
+
+        const variant = this.createNormalizedPlantVariant(result.scene);
+        variant.userData.plantBucket = result.profile.bucket;
+        variant.userData.plantScaleMultiplier = result.profile.scale;
+        variant.userData.scatterOnRoute = result.profile.scatterOnRoute === true;
+        return [variant];
+      });
+
+      this.populatePlantScatter(variants);
+    })().catch(() => {
+      /* loader / normalize errors — leave plants empty */
+    });
+
+    return this.plantScatterPromise;
+  }
+
+  private loadTreeScatter(): Promise<void> {
+    if (this.treeScatterPromise) {
+      return this.treeScatterPromise;
+    }
+
+    this.treeScatterPromise = (async () => {
+      const loadRequests = WorldManager.CURATED_TREE_PROFILES.map(
+        (profile) =>
+          new Promise<{ profile: CuratedTreeProfile; scene: THREE.Object3D } | null>((resolve) => {
+            this.plantLoader.load(
+              profile.url,
+              (gltf) => {
+                resolve({ profile, scene: gltf.scene });
+              },
+              undefined,
+              () => {
+                resolve(null);
+              },
+            );
+          }),
+      );
+
+      const results = await Promise.all(loadRequests);
+      let variants = results.flatMap((result) => {
+        if (!result) {
+          return [];
+        }
+
+        const treeSource = pickLargestSoloTreeSource(result.scene);
+        const variant = this.createNormalizedPlantVariant(treeSource, {
+          footprintTarget: WorldManager.TREE_SCATTER_NORMALIZE.footprintTarget,
+          heightTarget: WorldManager.TREE_SCATTER_NORMALIZE.heightTarget,
+        });
+        variant.userData.plantBucket = result.profile.bucket;
+        variant.userData.plantScaleMultiplier = result.profile.scale;
+        variant.userData.scatterOnRoute = result.profile.scatterOnRoute === true;
+        return [variant];
+      });
+
+      if (variants.length === 0) {
+        await new Promise<void>((resolve) => {
           this.plantLoader.load(
-            profile.url,
+            WorldManager.TREE_PACK_URL,
             (gltf) => {
-              resolve({ profile, scene: gltf.scene });
+              try {
+                const roots = extractLargeSoloTreeTemplates(gltf.scene, 5, {
+                  namePred: isPreferredScatterTreeFromPackName,
+                });
+                variants = roots.map((root, index) => {
+                  const v = this.createNormalizedPlantVariant(root, {
+                    footprintTarget: WorldManager.TREE_SCATTER_NORMALIZE.footprintTarget,
+                    heightTarget: WorldManager.TREE_SCATTER_NORMALIZE.heightTarget,
+                  });
+                  v.userData.plantBucket = 'tall';
+                  v.userData.plantScaleMultiplier = 1.04 + (index % 5) * 0.025;
+                  v.userData.scatterOnRoute = true;
+                  return v;
+                });
+                if (variants.length > 0) {
+                  console.info(
+                    '[WorldManager] Tree pack fallback (solo picks). Run `npm run trees:extract` for curated alien GLBs.',
+                  );
+                }
+              } catch (err) {
+                console.warn('[WorldManager] Tree pack fallback normalize failed:', err);
+              }
+              resolve();
             },
             undefined,
             () => {
-              resolve(null);
+              console.warn(
+                '[WorldManager] No trees: add curated GLBs (`npm run trees:extract`) or place stylized_low_poly_trees_pack_02.glb in public/assets/',
+              );
+              resolve();
             },
           );
-        }),
-    );
-
-    void Promise.all(loadRequests)
-      .then((results) => {
-        const variants = results.flatMap((result) => {
-          if (!result) {
-            return [];
-          }
-
-          const variant = this.createNormalizedPlantVariant(result.scene);
-          variant.userData.plantBucket = result.profile.bucket;
-          variant.userData.plantScaleMultiplier = result.profile.scale;
-          variant.userData.scatterOnRoute = result.profile.scatterOnRoute === true;
-          return [variant];
         });
+      }
 
-        this.populatePlantScatter(variants);
-      })
-      .catch(() => {
-        /* createNormalizedPlantVariant or loader can throw; keep scatter empty but allow retry */
-      })
-      .finally(() => {
-        this.plantScatterRequested = false;
-      });
+      if (variants.length === 0) {
+        return;
+      }
+
+      this.populateTreeScatter(variants);
+    })().catch(() => {
+      /* keep world valid */
+    });
+
+    return this.treeScatterPromise;
+  }
+
+  private static collectPlantMeshesDeep(root: THREE.Object3D): THREE.Mesh[] {
+    const meshes: THREE.Mesh[] = [];
+    root.updateMatrixWorld(true);
+    root.traverse((node) => {
+      if (node instanceof THREE.Mesh && node.geometry) {
+        meshes.push(node);
+      }
+    });
+    return meshes;
   }
 
   private populatePlantScatter(variants: THREE.Object3D[]): void {
-    this.plantScatterRoot.clear();
+    const routeVariantIndices: number[] = [];
+    for (let i = 0; i < variants.length; i += 1) {
+      const variant = variants[i];
+      if (variant.userData.plantBucket !== 'tall' || variant.userData.scatterOnRoute === true) {
+        routeVariantIndices.push(i);
+      }
+    }
+
+    this.populateInstancedGroundScatter(
+      variants,
+      this.plantScatterRoot,
+      {
+        spawn: 0.34,
+        path: 0.26,
+        challenge: 0.12,
+        decor: 0.12,
+      },
+      0.17,
+      routeVariantIndices,
+    );
+  }
+
+  private populateTreeScatter(variants: THREE.Object3D[]): void {
+    if (variants.length === 0) {
+      this.treeScatterRoot.clear();
+      return;
+    }
+
+    const surfaceByKey = buildSurfaceTileByGridKey();
+    const blockedTiles = new Set(
+      JUMP_PADS.map((pad) => `${Math.round(pad.x / BLOCK_UNIT - 0.5)}:${Math.round(pad.z / BLOCK_UNIT - 0.5)}`),
+    );
+
+    const variantCount = variants.length;
+    let variantCursor = 0;
+    const placements: GroundScatterPlacement[] = [];
+
+    const anchoredClusterIds = new Set(WorldManager.TREE_ANCHORS.map((a) => a.clusterId));
+
+    for (const anchor of WorldManager.TREE_ANCHORS) {
+      const cluster = PLATFORM_CLUSTERS.find((c) => c.id === anchor.clusterId);
+      if (!cluster) {
+        continue;
+      }
+      const placed = this.tryPlaceTreeOnClusterSurface({
+        cluster,
+        variants,
+        surfaceByKey,
+        blockedTiles,
+        variantIndex: Math.min(Math.max(0, anchor.variantIndex), variantCount - 1),
+        placement: anchor.placement,
+        bypassClearance: anchor.placement !== 'searchFirstClear',
+      });
+      if (placed) {
+        const { tileKey, ...rest } = placed;
+        placements.push(rest);
+        this.decorOccupiedSurfaceKeys.add(tileKey);
+      }
+    }
+
+    for (const cluster of PLATFORM_CLUSTERS) {
+      if (WorldManager.TREE_SPAWN_BLACKLIST_CLUSTERS.has(cluster.id)) {
+        continue;
+      }
+      if (anchoredClusterIds.has(cluster.id)) {
+        continue;
+      }
+
+      const baseDensity =
+        cluster.role === 'spawn'
+          ? WorldManager.TREE_CLUSTER_DENSITY.spawn
+          : cluster.role === 'path'
+            ? WorldManager.TREE_CLUSTER_DENSITY.path
+            : cluster.role === 'challenge'
+              ? WorldManager.TREE_CLUSTER_DENSITY.challenge
+              : WorldManager.TREE_CLUSTER_DENSITY.decor;
+      const scatterRoll = this.hashTile(cluster.gridX, cluster.gridZ, WorldManager.TREE_CLUSTER_HASH_SEED);
+      if (scatterRoll > baseDensity) {
+        continue;
+      }
+
+      const variantIndex = variantCursor % variantCount;
+      variantCursor += 1;
+
+      const placed = this.tryPlaceTreeOnClusterSurface({
+        cluster,
+        variants,
+        surfaceByKey,
+        blockedTiles,
+        variantIndex,
+        placement: 'searchFirstClear',
+        bypassClearance: false,
+      });
+      if (placed) {
+        const { tileKey, ...rest } = placed;
+        placements.push(rest);
+        this.decorOccupiedSurfaceKeys.add(tileKey);
+      }
+    }
+
+    this.finalizeInstancedGroundScatter(variants, this.treeScatterRoot, placements);
+  }
+
+  /** Curated order: 0 palm-curved, 1 palm-broad, 2 palm-generic, 3 jelly, 4 orb, 5 crystal, 6 mushroom, 7 weird-flora. */
+  private static readonly TREE_SPAWN_BLACKLIST_CLUSTERS = new Set<string>(['spawn-a']);
+
+  private static readonly TREE_ANCHORS: readonly {
+    clusterId: string;
+    variantIndex: number;
+    placement: 'footprintCenter' | 'maxWorldZ' | 'searchFirstClear';
+  }[] = [
+    { clusterId: 'spawn-b', variantIndex: 0, placement: 'searchFirstClear' },
+    { clusterId: 'mid-b', variantIndex: 3, placement: 'searchFirstClear' },
+    { clusterId: 'mid-a', variantIndex: 7, placement: 'footprintCenter' },
+    { clusterId: 'spawn-f', variantIndex: 2, placement: 'maxWorldZ' },
+  ];
+
+  private static readonly TREE_CLUSTER_HASH_SEED = 0.37;
+
+  /** One stochastic roll per cluster for **non-anchored** clusters only. */
+  private static readonly TREE_CLUSTER_DENSITY = {
+    spawn: 0.22,
+    path: 0.18,
+    challenge: 0.12,
+    decor: 0.14,
+  } as const;
+
+  private pickAnchoredTreeSurfaceTile(
+    cluster: (typeof PLATFORM_CLUSTERS)[number],
+    surfaceByKey: ReadonlyMap<string, (typeof PLATFORM_SURFACE_TILES)[number]>,
+    placement: 'footprintCenter' | 'maxWorldZ',
+  ): (typeof PLATFORM_SURFACE_TILES)[number] | null {
+    if (placement === 'footprintCenter') {
+      return getClusterCenterSurfaceTile(cluster, surfaceByKey);
+    }
+    return getClusterSurfaceTileMaxWorldZ(cluster, surfaceByKey);
+  }
+
+  private tryPlaceTreeOnClusterSurface(args: {
+    cluster: (typeof PLATFORM_CLUSTERS)[number];
+    variants: THREE.Object3D[];
+    surfaceByKey: ReadonlyMap<string, (typeof PLATFORM_SURFACE_TILES)[number]>;
+    blockedTiles: ReadonlySet<string>;
+    variantIndex: number;
+    placement: 'footprintCenter' | 'maxWorldZ' | 'searchFirstClear';
+    bypassClearance: boolean;
+  }): (GroundScatterPlacement & { tileKey: string }) | null {
+    const {
+      cluster,
+      variants,
+      surfaceByKey,
+      blockedTiles,
+      variantIndex,
+      placement,
+      bypassClearance,
+    } = args;
+
+    if (placement === 'searchFirstClear') {
+      for (const candidate of listClusterSurfaceTilesNearestFootprintCenterFirst(cluster, surfaceByKey)) {
+        const k = surfaceGridKeyFromTile(candidate);
+        if (blockedTiles.has(k) || this.decorOccupiedSurfaceKeys.has(k)) {
+          continue;
+        }
+        if (!surfaceTilePassesTreeSpawnClearance(candidate, surfaceByKey)) {
+          continue;
+        }
+        return this.buildTreeScatterPlacement(candidate, variants, variantIndex, placement);
+      }
+      return null;
+    }
+
+    const tile = this.pickAnchoredTreeSurfaceTile(cluster, surfaceByKey, placement);
+    if (!tile) {
+      return null;
+    }
+    const tileKey = surfaceGridKeyFromTile(tile);
+    if (blockedTiles.has(tileKey) || this.decorOccupiedSurfaceKeys.has(tileKey)) {
+      return null;
+    }
+    if (!bypassClearance && !surfaceTilePassesTreeSpawnClearance(tile, surfaceByKey)) {
+      return null;
+    }
+    return this.buildTreeScatterPlacement(tile, variants, variantIndex, placement);
+  }
+
+  private buildTreeScatterPlacement(
+    tile: (typeof PLATFORM_SURFACE_TILES)[number],
+    variants: THREE.Object3D[],
+    variantIndex: number,
+    placement: 'footprintCenter' | 'maxWorldZ' | 'searchFirstClear',
+  ): GroundScatterPlacement & { tileKey: string } {
+    const variant = variants[variantIndex];
+    const authoredScale =
+      typeof variant.userData.plantScaleMultiplier === 'number' ? variant.userData.plantScaleMultiplier : 1;
+    const jitterScale = authoredScale * (0.92 + this.hashTile(tile.gridX, tile.gridZ, 2.91) * 0.08);
+    const yawStep = Math.floor(this.hashTile(tile.gridX, tile.gridZ, 1.13) * 4);
+    const yaw = yawStep * (Math.PI * 0.5);
+
+    let vx = 0;
+    let vz = 0;
+    if (tile.exposedLeft) {
+      vx -= 1;
+    }
+    if (tile.exposedRight) {
+      vx += 1;
+    }
+    if (tile.exposedFront) {
+      vz -= 1;
+    }
+    if (tile.exposedBack) {
+      vz += 1;
+    }
+    const horiz = Math.hypot(vx, vz);
+    const ledgeNudge = BLOCK_UNIT * 0.38;
+    const skipLedgeNudge = placement === 'footprintCenter' || placement === 'maxWorldZ';
+    const placeX =
+      skipLedgeNudge || horiz <= 1e-5 ? tile.x : tile.x + (vx / horiz) * ledgeNudge;
+    const placeZ =
+      skipLedgeNudge || horiz <= 1e-5 ? tile.z : tile.z + (vz / horiz) * ledgeNudge;
+    const groundY = this.terrainPhysics.getGroundHeightAt(placeX, placeZ) ?? tile.topY;
+
+    return {
+      variantIndex,
+      tileX: placeX,
+      tileZ: placeZ,
+      groundY,
+      yaw,
+      jitterScale,
+      tileKey: surfaceGridKeyFromTile(tile),
+    };
+  }
+
+  private populateInstancedGroundScatter(
+    variants: THREE.Object3D[],
+    mountRoot: THREE.Group,
+    density: { spawn: number; path: number; challenge: number; decor: number },
+    hashSeed: number,
+    routeVariantIndices: number[],
+  ): void {
+    mountRoot.clear();
     if (variants.length === 0) {
       return;
     }
 
-    const routeVariants = variants.filter(
-      (variant) =>
-        variant.userData.plantBucket !== 'tall' || variant.userData.scatterOnRoute === true,
-    );
+    const allVariantIndices = variants.map((_, index) => index);
     let routeVariantCursor = 0;
     let offRouteVariantCursor = 0;
 
@@ -537,61 +959,146 @@ export class WorldManager {
       JUMP_PADS.map((pad) => `${Math.round(pad.x / BLOCK_UNIT - 0.5)}:${Math.round(pad.z / BLOCK_UNIT - 0.5)}`),
     );
 
+    const placements: GroundScatterPlacement[] = [];
+
     for (const tile of PLATFORM_SURFACE_TILES) {
-      if (blockedTiles.has(`${tile.gridX}:${tile.gridZ}`)) {
+      const tileKey = surfaceGridKeyFromTile(tile);
+      if (blockedTiles.has(tileKey)) {
+        continue;
+      }
+      if (this.decorOccupiedSurfaceKeys.has(tileKey)) {
         continue;
       }
 
-      const baseDensity = tile.role === 'spawn' ? 0.34 : tile.role === 'path' ? 0.26 : 0.12;
-      const scatterRoll = this.hashTile(tile.gridX, tile.gridZ, 0.17);
+      const baseDensity =
+        tile.role === 'spawn'
+          ? density.spawn
+          : tile.role === 'path'
+            ? density.path
+            : tile.role === 'challenge'
+              ? density.challenge
+              : density.decor;
+      const scatterRoll = this.hashTile(tile.gridX, tile.gridZ, hashSeed);
       if (scatterRoll > baseDensity) {
         continue;
       }
 
       const useRoutePool = tile.role === 'spawn' || tile.role === 'path';
-      const selectionPool = useRoutePool ? routeVariants : variants;
+      const pool = useRoutePool ? routeVariantIndices : allVariantIndices;
+      if (pool.length === 0) {
+        continue;
+      }
       const selectionIndex = useRoutePool ? routeVariantCursor : offRouteVariantCursor;
-      const selectedVariant = selectionPool[selectionIndex % selectionPool.length] ?? variants[0];
+      const variantIndex = pool[selectionIndex % pool.length] ?? 0;
       if (useRoutePool) {
         routeVariantCursor += 1;
       } else {
         offRouteVariantCursor += 1;
       }
-      const plant = selectedVariant.clone(true);
+
+      const variant = variants[variantIndex];
+      const authoredScale =
+        typeof variant.userData.plantScaleMultiplier === 'number' ? variant.userData.plantScaleMultiplier : 1;
+      const jitterScale = authoredScale * (0.92 + this.hashTile(tile.gridX, tile.gridZ, 2.91) * 0.08);
       const yawStep = Math.floor(this.hashTile(tile.gridX, tile.gridZ, 1.13) * 4);
       const yaw = yawStep * (Math.PI * 0.5);
-      const authoredScale = typeof plant.userData.plantScaleMultiplier === 'number'
-        ? plant.userData.plantScaleMultiplier
-        : 1;
-      const jitterScale = authoredScale * (0.92 + this.hashTile(tile.gridX, tile.gridZ, 2.91) * 0.08);
-
       const groundY = this.terrainPhysics.getGroundHeightAt(tile.x, tile.z) ?? tile.topY;
 
-      const meshRoot =
-        plant.getObjectByName(WorldManager.PLANT_MESH_ROOT_NAME) ?? plant.children[0] ?? plant;
-      plant.position.set(0, 0, 0);
-      plant.rotation.set(0, 0, 0);
-      plant.scale.set(1, 1, 1);
-      meshRoot.scale.multiplyScalar(jitterScale);
-      plant.updateMatrixWorld(true);
+      placements.push({
+        variantIndex,
+        tileX: tile.x,
+        tileZ: tile.z,
+        groundY,
+        yaw,
+        jitterScale,
+      });
+      this.decorOccupiedSurfaceKeys.add(tileKey);
+    }
 
-      // Foot from AABB at yaw=0; Y-rotation preserves vertex Y.
-      const footBounds = new THREE.Box3().setFromObject(plant);
+    this.finalizeInstancedGroundScatter(variants, mountRoot, placements);
+  }
+
+  private finalizeInstancedGroundScatter(
+    variants: THREE.Object3D[],
+    mountRoot: THREE.Group,
+    placements: GroundScatterPlacement[],
+  ): void {
+    const counts = new Array(variants.length).fill(0);
+    for (const p of placements) {
+      counts[p.variantIndex] += 1;
+    }
+
+    const instancedLayers: THREE.InstancedMesh[][] = variants.map(() => []);
+
+    for (let vi = 0; vi < variants.length; vi += 1) {
+      const n = counts[vi];
+      if (n === 0) {
+        continue;
+      }
+
+      const templateMeshes = WorldManager.collectPlantMeshesDeep(variants[vi]);
+      for (const templateMesh of templateMeshes) {
+        const instanced = new THREE.InstancedMesh(templateMesh.geometry, templateMesh.material, n);
+        instanced.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+        instanced.castShadow = true;
+        instanced.receiveShadow = true;
+        instanced.frustumCulled = true;
+        mountRoot.add(instanced);
+        instancedLayers[vi].push(instanced);
+      }
+    }
+
+    const cursors = new Array(variants.length).fill(0);
+    const surfaceSink = BLOCK_UNIT * 0.018;
+
+    for (const p of placements) {
+      const vi = p.variantIndex;
+      const idx = cursors[vi];
+      cursors[vi] += 1;
+
+      const variant = variants[vi];
+      const clone = variant.clone(true);
+      const meshRoot =
+        clone.getObjectByName(WorldManager.PLANT_MESH_ROOT_NAME) ?? clone.children[0] ?? clone;
+
+      clone.position.set(0, 0, 0);
+      clone.rotation.set(0, 0, 0);
+      clone.scale.set(1, 1, 1);
+      meshRoot.scale.multiplyScalar(p.jitterScale);
+      clone.updateMatrixWorld(true);
+
+      const footBounds = new THREE.Box3().setFromObject(clone);
       let footMinY = footBounds.min.y;
       if (!Number.isFinite(footMinY)) {
         footMinY = 0;
       }
 
-      plant.rotation.y = yaw;
-      const surfaceSink = BLOCK_UNIT * 0.018;
-      plant.position.set(tile.x, groundY - footMinY - surfaceSink, tile.z);
-      plant.updateMatrixWorld(true);
-      this.applyShadowFlags(plant);
-      this.plantScatterRoot.add(plant);
+      clone.rotation.y = p.yaw;
+      clone.position.set(p.tileX, p.groundY - footMinY - surfaceSink, p.tileZ);
+      clone.updateMatrixWorld(true);
+
+      const cloneMeshes = WorldManager.collectPlantMeshesDeep(clone);
+      const layers = instancedLayers[vi];
+      const layerCount = Math.min(cloneMeshes.length, layers.length);
+      for (let li = 0; li < layerCount; li += 1) {
+        layers[li].setMatrixAt(idx, cloneMeshes[li].matrixWorld);
+      }
+    }
+
+    for (const layers of instancedLayers) {
+      for (const im of layers) {
+        im.instanceMatrix.needsUpdate = true;
+      }
     }
   }
 
-  private createNormalizedPlantVariant(source: THREE.Object3D): THREE.Object3D {
+  private createNormalizedPlantVariant(
+    source: THREE.Object3D,
+    fit: { footprintTarget: number; heightTarget: number } = {
+      footprintTarget: BLOCK_UNIT * 0.76 * 0.75,
+      heightTarget: BLOCK_UNIT * 1.02,
+    },
+  ): THREE.Object3D {
     source.updateWorldMatrix(true, true);
     const sourceWorldInverse = source.matrixWorld.clone().invert();
     const sourceWorldPosition = new THREE.Vector3();
@@ -643,8 +1150,8 @@ export class WorldManager {
 
     const size = boundsUnscaled.getSize(new THREE.Vector3());
     const footprint = Math.max(0.001, Math.max(size.x, size.z));
-    const footprintScale = (BLOCK_UNIT * 0.76) / footprint;
-    const heightScale = (BLOCK_UNIT * 1.02) / Math.max(0.001, size.y);
+    const footprintScale = fit.footprintTarget / footprint;
+    const heightScale = fit.heightTarget / Math.max(0.001, size.y);
     const uniformScale = Math.min(footprintScale, heightScale);
 
     meshRoot.scale.setScalar(uniformScale);
@@ -705,15 +1212,6 @@ export class WorldManager {
     geometry.attributes.uv.needsUpdate = true;
   }
 
-  private applyShadowFlags(object: THREE.Object3D): void {
-    object.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
-  }
-
   private createSkyGradientTexture(): THREE.CanvasTexture {
     const canvas = document.createElement('canvas');
     canvas.width = 32;
@@ -738,32 +1236,61 @@ export class WorldManager {
   }
 
   private buildCrystals(): CrystalInstance[] {
-    return CRYSTAL_ANCHORS.map(({ x, z, color }, index) => {
-      const crystal = this.props.createCrystal(color);
+    const colorCounts = new Map<string, number>();
+    for (const anchor of CRYSTAL_ANCHORS) {
+      colorCounts.set(anchor.color, (colorCounts.get(anchor.color) ?? 0) + 1);
+    }
+
+    const colorToMesh = new Map<string, THREE.InstancedMesh>();
+    for (const [color, count] of colorCounts) {
+      const mesh = this.props.createCrystalInstancedMesh(color, count);
+      mesh.frustumCulled = true;
+      this.worldRoot.add(mesh);
+      colorToMesh.set(color, mesh);
+    }
+
+    const colorCursor = new Map<string, number>();
+    for (const color of colorCounts.keys()) {
+      colorCursor.set(color, 0);
+    }
+
+    const instances: CrystalInstance[] = [];
+
+    CRYSTAL_ANCHORS.forEach(({ x, z, color }, index) => {
+      const instancedMesh = colorToMesh.get(color)!;
+      const instanceIndex = colorCursor.get(color)!;
+      colorCursor.set(color, instanceIndex + 1);
+
       const surfaceSample = this.terrainPhysics.getNearestSpawnSurface(x, z);
+      const basePosition = new THREE.Vector3(
+        surfaceSample ? surfaceSample.position.x : x,
+        (surfaceSample ? surfaceSample.position.y : BLOCK_UNIT * 0.14) + BLOCK_UNIT * 0.14,
+        surfaceSample ? surfaceSample.position.z : z,
+      );
 
-      if (surfaceSample) {
-        crystal.position.set(
-          surfaceSample.position.x,
-          surfaceSample.position.y + BLOCK_UNIT * 0.14,
-          surfaceSample.position.z,
-        );
-      } else {
-        crystal.position.set(x, BLOCK_UNIT * 0.14, z);
-      }
+      this.crystalLayoutDummy.position.copy(basePosition);
+      this.crystalLayoutDummy.rotation.set(0, index * 0.73, 0);
+      this.crystalLayoutDummy.scale.set(0.58, 0.92, 0.58);
+      this.crystalLayoutDummy.updateMatrix();
+      instancedMesh.setMatrixAt(instanceIndex, this.crystalLayoutDummy.matrix);
 
-      crystal.rotation.set(0, index * 0.73, 0);
-      this.worldRoot.add(crystal);
-
-      const basePosition = crystal.position.clone();
-
-      return {
+      instances.push({
         id: `crystal-${index}`,
-        mesh: crystal,
-        basePosition,
+        instancedMesh,
+        instanceIndex,
+        basePosition: basePosition.clone(),
         collected: false,
         respawnAt: 0,
-      };
+        rotationY: index * 0.73,
+      });
+
+      this.decorOccupiedSurfaceKeys.add(surfaceGridKeyFromWorldXZ(basePosition.x, basePosition.z));
     });
+
+    for (const mesh of colorToMesh.values()) {
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+
+    return instances;
   }
 }
