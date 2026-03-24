@@ -1,6 +1,6 @@
 Place downloadable 3D assets here. They are served at `/assets/…` (e.g. `school_of_fish.glb` → `/assets/school_of_fish.glb`).
 
-**Stylized trees (source pack):** `stylized_low_poly_trees_pack_02.glb` — place the **full** purchased file at **`public/assets/stylized_low_poly_trees_pack_02.glb`**, then run **`npm run trees:extract`** to split **solo** palms + alien flora into **`public/plants/trees-curated/*.glb`** (see `public/plants/trees-curated/README.md`). The game does **not** scatter from the monolithic pack anymore; it only loads those curated solo GLBs. Use **`npm run trees:list`** if you need to tune name matching in `scripts/extract-curated-trees.mjs`.
+**Stylized trees (source pack, offline only for now):** keep **`public/assets/stylized_low_poly_trees_pack_02.glb`** and **`public/plants/trees-curated/*.glb`** on disk for reuse. The game **does not** load or scatter trees at runtime right now. To regenerate curated solo GLBs from the pack, run **`npm run trees:extract`** (see **`public/plants/trees-curated/README.md`**). Use **`npm run trees:list`** to tune name matching in **`scripts/extract-curated-trees.mjs`**.
 
 **Butterflies:** `butterflies.glb` — scattered on platform tops, raised **`BLOCK_UNIT * 2.05`** above `topY` so they clear plants/floor; scaled ~**1.575** max extent. Avoids jump pads, moving elevator tiles, crystal anchors, and each other (`ButterflyScatterSystem.ts`). Prefer a clip named like *fly / flutter / wing / flap / idle*; otherwise the first clip is used. Drop the file at `public/assets/butterflies.glb`.
 
