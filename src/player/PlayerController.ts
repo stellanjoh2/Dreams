@@ -20,6 +20,9 @@ export class PlayerController {
   private static readonly DROWNING_POST_DEATH_TAIL_SEC = 2.75;
   /** Wider foot circle if the normal probe misses narrow 1×1 tops (crack / edge stands). */
   private static readonly GROUND_SUPPORT_RADIUS_BOOST = 1.18;
+  /** Cap vertical travel per sub-step so floor contact resolves inside the frame (no one-frame snap). */
+  private static readonly VERT_SUBSTEP_MAX_DISP = 0.055;
+  private static readonly VERT_SUBSTEP_MAX_ITERS = 72;
 
   readonly position = new THREE.Vector3(0, WORLD_FLOOR_Y, 12);
   private readonly collisionRadius = 0.55;
@@ -165,64 +168,17 @@ export class PlayerController {
       }
     }
 
-    const gravity = this.verticalVelocity > 0 ? 11.9 : 15.6;
     const wasAirborne = !this.grounded;
     const previousY = this.position.y;
-    this.verticalVelocity -= gravity * delta;
-
-    const vy = this.verticalVelocity;
-    const sweepEndY = previousY + vy * delta;
-
-    /**
-     * Swept landing: if the foot trajectory crosses a platform top this frame, stop **on** the surface
-     * instead of stepping past it and snapping back (removes one-frame clip / “teleport” feel).
-     */
-    const sweepProbeMaxY = Math.max(previousY, sweepEndY) + 0.45;
-    let sweepSupport = getGroundSupportAt(px, pz, supportRadius, sweepProbeMaxY);
-    if (sweepSupport === null) {
-      sweepSupport = getGroundSupportAt(
-        px,
-        pz,
-        this.collisionRadius * PlayerController.GROUND_SUPPORT_RADIUS_BOOST,
-        sweepProbeMaxY,
-      );
-    }
-    const sweepGroundY = sweepSupport?.height ?? null;
-
-    let landedBySweep = false;
-    if (sweepGroundY !== null && vy < 0) {
-      const fromAbove = previousY >= sweepGroundY - PlayerController.LANDING_SNAP_BUFFER;
-      const crossesOrTouchesTop = sweepEndY <= sweepGroundY + 1e-4;
-      if (fromAbove && crossesOrTouchesTop) {
-        landedBySweep = true;
-        this.position.y = sweepGroundY;
-        this.verticalVelocity = 0;
-        this.grounded = true;
-        this.groundGraceTimer = PlayerController.GROUND_GRACE_TIME;
-        if (wasAirborne && vy < -2) {
-          this.landingImpact = Math.max(this.landingImpact, THREE.MathUtils.clamp(-vy / 12, 0, 1));
-          const speedRatio = THREE.MathUtils.clamp(
-            this.horizontalVelocity.length() / Math.max(0.001, settings.movement.walkSpeed),
-            0,
-            settings.movement.runMultiplier,
-          );
-          const runBias = THREE.MathUtils.clamp(
-            (speedRatio - 1) / Math.max(0.01, settings.movement.runMultiplier - 1),
-            0,
-            1,
-          );
-          const impactCarry = THREE.MathUtils.clamp(-vy / 10, 0, 1);
-          this.landingGlide = Math.max(
-            this.landingGlide,
-            THREE.MathUtils.lerp(0.16, 0.48, runBias) * impactCarry,
-          );
-        }
-      }
-    }
-
-    if (!landedBySweep) {
-      this.position.y = sweepEndY;
-    }
+    const landedBySweep = this.integrateVerticalWithSubsteps(
+      delta,
+      px,
+      pz,
+      supportRadius,
+      getGroundSupportAt,
+      wasAirborne,
+      settings,
+    );
 
     resolveTerrainCollisions(
       this.position,
@@ -382,6 +338,154 @@ export class PlayerController {
 
   getWaterSubmersionDepth(): number {
     return Math.max(0, WATER_SURFACE_Y - this.position.y);
+  }
+
+  /**
+   * Semi-implicit gravity in small vertical slices so the first contact with a floor happens on a
+   * sub-step (smooth motion) instead of one full-frame snap past the surface.
+   */
+  private integrateVerticalWithSubsteps(
+    delta: number,
+    px: number,
+    pz: number,
+    supportRadius: number,
+    getGroundSupportAt: (
+      x: number,
+      z: number,
+      supportRadius?: number,
+      maxHeight?: number,
+    ) => GroundSupportSample | null,
+    wasAirborne: boolean,
+    settings: FxSettings,
+  ): boolean {
+    let y = this.position.y;
+    let v = this.verticalVelocity;
+    let timeLeft = delta;
+    let landed = false;
+
+    for (let iter = 0; iter < PlayerController.VERT_SUBSTEP_MAX_ITERS && timeLeft > 1e-10; iter += 1) {
+      const g = v > 0 ? 11.9 : 15.6;
+      const speed = Math.max(Math.abs(v), 1.2);
+      let h = Math.min(timeLeft, PlayerController.VERT_SUBSTEP_MAX_DISP / speed);
+      if (h <= 0) {
+        break;
+      }
+
+      const vNew = v - g * h;
+      const yNew = y + vNew * h;
+
+      const sweepProbeMaxY = Math.max(y, yNew) + 0.45;
+      let sweepSupport = getGroundSupportAt(px, pz, supportRadius, sweepProbeMaxY);
+      if (sweepSupport === null) {
+        sweepSupport = getGroundSupportAt(
+          px,
+          pz,
+          this.collisionRadius * PlayerController.GROUND_SUPPORT_RADIUS_BOOST,
+          sweepProbeMaxY,
+        );
+      }
+      const gh = sweepSupport?.height ?? null;
+
+      if (gh !== null && vNew < 0) {
+        const fromAbove = y >= gh - PlayerController.LANDING_SNAP_BUFFER;
+        const crossesOrTouchesTop = yNew <= gh + 1e-4;
+        if (fromAbove && crossesOrTouchesTop) {
+          landed = true;
+          this.position.y = gh;
+          this.verticalVelocity = 0;
+          this.grounded = true;
+          this.groundGraceTimer = PlayerController.GROUND_GRACE_TIME;
+          if (wasAirborne && vNew < -2) {
+            this.landingImpact = Math.max(
+              this.landingImpact,
+              THREE.MathUtils.clamp(-vNew / 12, 0, 1),
+            );
+            const speedRatio = THREE.MathUtils.clamp(
+              this.horizontalVelocity.length() / Math.max(0.001, settings.movement.walkSpeed),
+              0,
+              settings.movement.runMultiplier,
+            );
+            const runBias = THREE.MathUtils.clamp(
+              (speedRatio - 1) / Math.max(0.01, settings.movement.runMultiplier - 1),
+              0,
+              1,
+            );
+            const impactCarry = THREE.MathUtils.clamp(-vNew / 10, 0, 1);
+            this.landingGlide = Math.max(
+              this.landingGlide,
+              THREE.MathUtils.lerp(0.16, 0.48, runBias) * impactCarry,
+            );
+          }
+          break;
+        }
+      }
+
+      y = yNew;
+      v = vNew;
+      timeLeft -= h;
+    }
+
+    /** Large `delta` spikes (tab focus, hitch): finish remaining time in one slice so state stays consistent. */
+    if (!landed && timeLeft > 1e-8) {
+      const g = v > 0 ? 11.9 : 15.6;
+      const h = timeLeft;
+      const vNew = v - g * h;
+      const yNew = y + vNew * h;
+      const sweepProbeMaxY = Math.max(y, yNew) + 0.45;
+      let sweepSupport = getGroundSupportAt(px, pz, supportRadius, sweepProbeMaxY);
+      if (sweepSupport === null) {
+        sweepSupport = getGroundSupportAt(
+          px,
+          pz,
+          this.collisionRadius * PlayerController.GROUND_SUPPORT_RADIUS_BOOST,
+          sweepProbeMaxY,
+        );
+      }
+      const gh = sweepSupport?.height ?? null;
+      if (gh !== null && vNew < 0) {
+        const fromAbove = y >= gh - PlayerController.LANDING_SNAP_BUFFER;
+        const crossesOrTouchesTop = yNew <= gh + 1e-4;
+        if (fromAbove && crossesOrTouchesTop) {
+          landed = true;
+          this.position.y = gh;
+          this.verticalVelocity = 0;
+          this.grounded = true;
+          this.groundGraceTimer = PlayerController.GROUND_GRACE_TIME;
+          if (wasAirborne && vNew < -2) {
+            this.landingImpact = Math.max(
+              this.landingImpact,
+              THREE.MathUtils.clamp(-vNew / 12, 0, 1),
+            );
+            const speedRatio = THREE.MathUtils.clamp(
+              this.horizontalVelocity.length() / Math.max(0.001, settings.movement.walkSpeed),
+              0,
+              settings.movement.runMultiplier,
+            );
+            const runBias = THREE.MathUtils.clamp(
+              (speedRatio - 1) / Math.max(0.01, settings.movement.runMultiplier - 1),
+              0,
+              1,
+            );
+            const impactCarry = THREE.MathUtils.clamp(-vNew / 10, 0, 1);
+            this.landingGlide = Math.max(
+              this.landingGlide,
+              THREE.MathUtils.lerp(0.16, 0.48, runBias) * impactCarry,
+            );
+          }
+        }
+      }
+      if (!landed) {
+        y = yNew;
+        v = vNew;
+      }
+    }
+
+    if (!landed) {
+      this.position.y = y;
+      this.verticalVelocity = v;
+    }
+
+    return landed;
   }
 
   private applyHorizontalMovement(

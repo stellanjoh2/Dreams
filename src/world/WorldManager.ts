@@ -202,6 +202,8 @@ export class WorldManager {
       updateDistantWorldBackdropMotion(this.distantBackdrop, elapsed);
     }
 
+    this.distantPlanets.update(delta);
+
     if (this.cloudRingGroup && this.orbitalClouds.length > 0) {
       updateStylizedCloudRing(this.orbitalClouds, this.cloudRingGroup, delta, elapsed);
     }

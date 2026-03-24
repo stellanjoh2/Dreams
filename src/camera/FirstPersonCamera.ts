@@ -87,8 +87,8 @@ export class FirstPersonCamera {
     }
 
     this.bobOffset = Math.sin(this.bobTime) * headBobAmount * movementAmount;
-    const targetLandingOffset = -landingImpact * 0.18;
-    this.landingOffset = THREE.MathUtils.damp(this.landingOffset, targetLandingOffset, 18, delta);
+    const targetLandingOffset = -landingImpact * 0.1;
+    this.landingOffset = THREE.MathUtils.damp(this.landingOffset, targetLandingOffset, 11, delta);
     const safeNormalFov = Math.max(40, normalFov);
     const safeFastFov = Math.max(safeNormalFov, fastFov);
     const speedBlend = THREE.MathUtils.clamp((speedRatio - 1) * 1.35, 0, 1);

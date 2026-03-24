@@ -32,6 +32,15 @@ const PLANET_SIZE_MULTIPLIERS: readonly number[] = [1.0, 1.12, 0.94, 1.06, 0.88]
 /** World Y center of each planet (above mountain silhouettes on average). */
 const PLANET_Y_MULT_BLOCKS = [52, 58, 48, 62, 55] as const;
 
+/**
+ * Extra height in **blocks** added on top of `PLANET_Y_MULT_BLOCKS` for a subset of planets only
+ * (zeros keep the original silhouette ring; non-zero lifts a few higher for depth).
+ */
+const PLANET_Y_EXTRA_BLOCKS: readonly number[] = [0, 16, 0, 22, 0];
+
+/** Local-space yaw rate (rad/s); signs vary so they don’t all turn the same way. */
+const PLANET_SPIN_YAW_RAD_PER_SEC: readonly number[] = [0.034, -0.027, 0.041, -0.032, 0.036];
+
 /** Phase offset so planets don’t sit on the same ring angles as the four mountains. */
 const ANGLE_PHASE = 0.38;
 
@@ -170,13 +179,21 @@ export class DistantPlanetsBackdrop {
 
   private readonly loader = new GLTFLoader();
   private readonly textureLoader = new THREE.TextureLoader();
+  private readonly planetSpinEntries: { mesh: THREE.Object3D; yawRadPerSec: number }[] = [];
 
   constructor(parent: THREE.Object3D) {
     this.root.name = 'DistantPlanetsBackdrop';
     parent.add(this.root);
   }
 
+  update(delta: number): void {
+    for (const { mesh, yawRadPerSec } of this.planetSpinEntries) {
+      mesh.rotation.y += yawRadPerSec * delta;
+    }
+  }
+
   load(): void {
+    this.planetSpinEntries.length = 0;
     const { centerX, centerZ, farOuterR } = getBackdropFarFrameMetrics();
     const mountainOrbitMax =
       farOuterR + BLOCK_UNIT * (MOUNTAIN_ORBIT_MARGIN_BLOCKS + MOUNTAIN_SPAWN_EXTRA_MARGIN_BLOCKS);
@@ -207,11 +224,11 @@ export class DistantPlanetsBackdrop {
             continue;
           }
 
-        const planet = scene.clone(true);
-        planet.name = `DistantPlanet_${i}`;
-        applySmoothShadingToPlanetMeshes(planet);
-        const sizeMul = PLANET_SIZE_MULTIPLIERS[i] ?? 1;
-        normalizePlanetCentered(planet, PLANET_BASE_TARGET_EXTENT * sizeMul);
+          const planet = scene.clone(true);
+          planet.name = `DistantPlanet_${i}`;
+          applySmoothShadingToPlanetMeshes(planet);
+          const sizeMul = PLANET_SIZE_MULTIPLIERS[i] ?? 1;
+          normalizePlanetCentered(planet, PLANET_BASE_TARGET_EXTENT * sizeMul);
           if (baseMap) {
             applySharedBaseColorMap(planet, baseMap);
           }
@@ -222,7 +239,10 @@ export class DistantPlanetsBackdrop {
           const angle = baseAngle + jitter;
           const x = centerX + Math.cos(angle) * planetR;
           const z = centerZ + Math.sin(angle) * planetR;
-          const y = BLOCK_UNIT * PLANET_Y_MULT_BLOCKS[i % PLANET_Y_MULT_BLOCKS.length];
+          const yBlocks =
+            PLANET_Y_MULT_BLOCKS[i % PLANET_Y_MULT_BLOCKS.length] +
+            (PLANET_Y_EXTRA_BLOCKS[i] ?? 0);
+          const y = BLOCK_UNIT * yBlocks;
 
           const pivot = new THREE.Group();
           pivot.name = `DistantPlanetPivot_${i}`;
@@ -232,6 +252,11 @@ export class DistantPlanetsBackdrop {
           pivot.rotation.z = (hash01(i, 5.5) - 0.5) * 0.1;
           pivot.add(planet);
           this.root.add(pivot);
+
+          this.planetSpinEntries.push({
+            mesh: planet,
+            yawRadPerSec: PLANET_SPIN_YAW_RAD_PER_SEC[i] ?? 0.03,
+          });
         }
       },
     );
