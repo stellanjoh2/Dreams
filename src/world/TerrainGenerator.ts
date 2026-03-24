@@ -110,7 +110,7 @@ export class TerrainGenerator {
 
     const instancesByColor = new Map<string, Array<{ x: number; y: number; z: number }>>();
 
-    for (const tile of PLATFORM_TILES) {
+    const pushTileStacks = (tile: (typeof PLATFORM_TILES)[number]): void => {
       let instances = instancesByColor.get(tile.color);
       if (!instances) {
         instances = [];
@@ -124,6 +124,10 @@ export class TerrainGenerator {
           z: tile.z,
         });
       }
+    };
+
+    for (const tile of PLATFORM_TILES) {
+      pushTileStacks(tile);
     }
 
     for (const [color, instances] of instancesByColor) {

@@ -145,6 +145,37 @@ const withoutTiles = (tiles: readonly TileOffset[], omitted: readonly TileOffset
   return tiles.filter(([x, z]) => !omittedKeys.has(`${x}:${z}`));
 };
 
+function platformClusterFromSpec(spec: ClusterSpec): PlatformCluster {
+  const footprint = FOOTPRINTS[spec.footprint];
+  const baseHeightUnits = spec.baseHeightUnits ?? BLOCK_BASE_UNITS;
+  const topY = spec.heightUnits * BLOCK_UNIT;
+  const stackCount = spec.heightUnits - baseHeightUnits;
+  const baseY = baseHeightUnits * BLOCK_UNIT;
+
+  return {
+    id: spec.id,
+    islandId: spec.islandId,
+    footprint: spec.footprint,
+    gridX: spec.gridX,
+    gridZ: spec.gridZ,
+    widthUnits: footprint.widthUnits,
+    depthUnits: footprint.depthUnits,
+    baseHeightUnits,
+    heightUnits: spec.heightUnits,
+    x: (spec.gridX + footprint.widthUnits * 0.5) * BLOCK_UNIT,
+    z: (spec.gridZ + footprint.depthUnits * 0.5) * BLOCK_UNIT,
+    width: footprint.widthUnits * BLOCK_UNIT,
+    depth: footprint.depthUnits * BLOCK_UNIT,
+    height: topY - baseY,
+    stackCount,
+    topY,
+    baseY,
+    color: BLOCK_COLOR_PALETTE[spec.paletteIndex % BLOCK_COLOR_PALETTE.length],
+    role: spec.role ?? 'path',
+    tiles: spec.tiles ?? rectTiles(footprint.widthUnits, footprint.depthUnits),
+  };
+}
+
 const CLUSTER_SPECS: ClusterSpec[] = [
   {
     id: 'spawn-a',
@@ -246,36 +277,29 @@ const CLUSTER_SPECS: ClusterSpec[] = [
   { id: 'bonus-b', islandId: 'scatter', gridX: 0, gridZ: -13, footprint: '4x4', baseHeightUnits: 8, heightUnits: 11, paletteIndex: 1, role: 'path' },
 ];
 
-export const PLATFORM_CLUSTERS: PlatformCluster[] = CLUSTER_SPECS.map((spec) => {
-  const footprint = FOOTPRINTS[spec.footprint];
-  const baseHeightUnits = spec.baseHeightUnits ?? BLOCK_BASE_UNITS;
-  const topY = spec.heightUnits * BLOCK_UNIT;
-  const stackCount = spec.heightUnits - baseHeightUnits;
-  const baseY = baseHeightUnits * BLOCK_UNIT;
+export const PLATFORM_CLUSTERS: PlatformCluster[] = CLUSTER_SPECS.map(platformClusterFromSpec);
 
-  return {
-    id: spec.id,
-    islandId: spec.islandId,
-    footprint: spec.footprint,
-    gridX: spec.gridX,
-    gridZ: spec.gridZ,
-    widthUnits: footprint.widthUnits,
-    depthUnits: footprint.depthUnits,
-    baseHeightUnits,
-    heightUnits: spec.heightUnits,
-    x: (spec.gridX + footprint.widthUnits * 0.5) * BLOCK_UNIT,
-    z: (spec.gridZ + footprint.depthUnits * 0.5) * BLOCK_UNIT,
-    width: footprint.widthUnits * BLOCK_UNIT,
-    depth: footprint.depthUnits * BLOCK_UNIT,
-    height: topY - baseY,
-    stackCount,
-    topY,
-    baseY,
-    color: BLOCK_COLOR_PALETTE[spec.paletteIndex % BLOCK_COLOR_PALETTE.length],
-    role: spec.role ?? 'path',
-    tiles: spec.tiles ?? rectTiles(footprint.widthUnits, footprint.depthUnits),
-  };
-});
+/** Axis-aligned bounds of all platform tops in world XZ (for prop placement outside the playfield). */
+export function computePlatformPlayfieldWorldBounds(): {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+} {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const c of PLATFORM_CLUSTERS) {
+    const hx = c.width * 0.5;
+    const hz = c.depth * 0.5;
+    minX = Math.min(minX, c.x - hx);
+    maxX = Math.max(maxX, c.x + hx);
+    minZ = Math.min(minZ, c.z - hz);
+    maxZ = Math.max(maxZ, c.z + hz);
+  }
+  return { minX, maxX, minZ, maxZ };
+}
 
 const CLUSTER_COLOR_BY_ID = new Map(PLATFORM_CLUSTERS.map((cluster) => [cluster.id, cluster.color] as const));
 const colorForCluster = (clusterId: string, fallbackPaletteIndex = 0): string =>
@@ -383,165 +407,6 @@ export const PLATFORM_SURFACE_TILES: PlatformTile[] = (() => {
   }
   return [...map.values()];
 })();
-
-/** Top surface tile per world grid cell — same keys as {@link surfaceGridKeyFromTile}. */
-export function buildSurfaceTileByGridKey(): Map<string, PlatformTile> {
-  const m = new Map<string, PlatformTile>();
-  for (const t of PLATFORM_SURFACE_TILES) {
-    m.set(surfaceGridKeyFromTile(t), t);
-  }
-  return m;
-}
-
-/**
- * The occupied cluster cell whose center is closest to the footprint's continuous center
- * (uneven sizes / cut-outs: picks the nearest tile to the true middle).
- */
-export function getClusterCenterSurfaceTile(
-  cluster: PlatformCluster,
-  surfaceByGridKey: ReadonlyMap<string, PlatformTile>,
-): PlatformTile | null {
-  const tiles = cluster.tiles;
-  if (tiles.length === 0) {
-    return null;
-  }
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  for (const [lx, lz] of tiles) {
-    minX = Math.min(minX, lx);
-    maxX = Math.max(maxX, lx);
-    minZ = Math.min(minZ, lz);
-    maxZ = Math.max(maxZ, lz);
-  }
-  const cx = (minX + maxX) / 2;
-  const cz = (minZ + maxZ) / 2;
-  let best = tiles[0]!;
-  let bestD = Infinity;
-  for (const t of tiles) {
-    const [lx, lz] = t;
-    const d = (lx - cx) * (lx - cx) + (lz - cz) * (lz - cz);
-    if (d < bestD - 1e-12) {
-      bestD = d;
-      best = t;
-    } else if (Math.abs(d - bestD) <= 1e-12) {
-      if (lx < best[0] || (lx === best[0] && lz < best[1])) {
-        best = t;
-      }
-    }
-  }
-  const gridX = cluster.gridX + best[0];
-  const gridZ = cluster.gridZ + best[1];
-  return surfaceByGridKey.get(`${gridX}:${gridZ}`) ?? null;
-}
-
-/**
- * All top-surface tiles in this cluster, ordered by distance from the footprint’s continuous center
- * in **local** tile space (center first, then rings). Use when the geometric center cell is a poor tree anchor.
- */
-export function listClusterSurfaceTilesNearestFootprintCenterFirst(
-  cluster: PlatformCluster,
-  surfaceByGridKey: ReadonlyMap<string, PlatformTile>,
-): PlatformTile[] {
-  const tiles = cluster.tiles;
-  if (tiles.length === 0) {
-    return [];
-  }
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  for (const [lx, lz] of tiles) {
-    minX = Math.min(minX, lx);
-    maxX = Math.max(maxX, lx);
-    minZ = Math.min(minZ, lz);
-    maxZ = Math.max(maxZ, lz);
-  }
-  const cx = (minX + maxX) / 2;
-  const cz = (minZ + maxZ) / 2;
-
-  const wrapped: { tile: PlatformTile; d: number; lx: number; lz: number }[] = [];
-  for (const [lx, lz] of tiles) {
-    const gx = cluster.gridX + lx;
-    const gz = cluster.gridZ + lz;
-    const tile = surfaceByGridKey.get(`${gx}:${gz}`);
-    if (!tile) {
-      continue;
-    }
-    const d = (lx - cx) * (lx - cx) + (lz - cz) * (lz - cz);
-    wrapped.push({ tile, d, lx, lz });
-  }
-  wrapped.sort((a, b) => a.d - b.d || a.lx - b.lx || a.lz - b.lz);
-  return wrapped.map((w) => w.tile);
-}
-
-/** Top-surface tile in this cluster with largest world **Z** (e.g. toward the south / high‑Z coast). */
-export function getClusterSurfaceTileMaxWorldZ(
-  cluster: PlatformCluster,
-  surfaceByGridKey: ReadonlyMap<string, PlatformTile>,
-): PlatformTile | null {
-  let best: PlatformTile | null = null;
-  for (const [lx, lz] of cluster.tiles) {
-    const gx = cluster.gridX + lx;
-    const gz = cluster.gridZ + lz;
-    const tile = surfaceByGridKey.get(tileKey(gx, gz));
-    if (!tile) {
-      continue;
-    }
-    if (!best || tile.z > best.z) {
-      best = tile;
-    }
-  }
-  return best;
-}
-
-/** Cardinal + diagonal neighbors in grid space (distance 1). */
-const SURFACE_NEIGHBOR_OFFSETS: ReadonlyArray<readonly [number, number]> = [
-  [1, 0],
-  [-1, 0],
-  [0, 1],
-  [0, -1],
-  [1, 1],
-  [1, -1],
-  [-1, 1],
-  [-1, -1],
-];
-
-/**
- * True if any **nearby** surface cell (8-neighborhood) tops out **above** this tile — vertical mass
- * right beside the spawn that tall trees tend to intersect.
- */
-export function surfaceTileHasNearbyHigherSurface(
-  tile: PlatformTile,
-  surfaceByGridKey: ReadonlyMap<string, PlatformTile>,
-  topYEpsilon = 0.06,
-): boolean {
-  for (const [dx, dz] of SURFACE_NEIGHBOR_OFFSETS) {
-    const nb = surfaceByGridKey.get(`${tile.gridX + dx}:${tile.gridZ + dz}`);
-    if (nb && nb.topY > tile.topY + topYEpsilon) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Trees want at least one **exposed** side (ledge / drop / step) so they’re not buried in the interior.
- * We do **not** reject tiles next to taller platforms — that pattern is common on climb routes and removed almost all spawns.
- */
-export function surfaceTilePassesTreeSpawnClearance(
-  tile: PlatformTile,
-  _surfaceByGridKey: ReadonlyMap<string, PlatformTile>,
-  minExposedEdges = 1,
-): boolean {
-  const exposed =
-    (tile.exposedLeft ? 1 : 0) +
-    (tile.exposedRight ? 1 : 0) +
-    (tile.exposedFront ? 1 : 0) +
-    (tile.exposedBack ? 1 : 0);
-  return exposed >= minExposedEdges;
-}
 
 /** Grid cells that contain at least one platform tile (any height). Used to place elevators beside clusters. */
 const PLATFORM_GRID_OCCUPIED = new Set(PLATFORM_TILES.map((tile) => tileKey(tile.gridX, tile.gridZ)));

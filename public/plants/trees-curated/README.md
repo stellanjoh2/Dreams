@@ -1,4 +1,6 @@
-# Curated solo trees (runtime)
+# Curated solo trees (assets on disk)
+
+**Runtime:** the game **does not** load or scatter these trees right now — keep this folder and `public/assets/stylized_low_poly_trees_pack_02.glb` so you can wire them back in later.
 
 These **individual `.glb` files** are **generated** from your purchased pack — same idea as `public/plants/curated/` for small plants.
 
@@ -14,8 +16,6 @@ These **individual `.glb` files** are **generated** from your purchased pack —
 The script writes stable filenames (`solo-palm-*.glb`, `solo-alien-*.glb`) and `manifest.json`. The game loads **five** alien / colourful heroes: `solo-alien-weird-flora`, `solo-alien-mushroom`, `solo-alien-jelly`, `solo-alien-orb`, `solo-alien-crystal` (see `WorldManager.CURATED_TREE_PROFILES`). No big green broad palms.
 
 **If these files are missing**, the game falls back to the **full pack** at `public/assets/stylized_low_poly_trees_pack_02.glb`, **unpacks** nested/grid groups, then prefers roots whose names look alien/colourful — numbered `Tree033_32`-style names are all accepted (`isPreferredScatterTreeFromPackName` in `treePackFallback.ts`). You still need that GLB in `public/assets/` for any trees to show.
-
-**Scatter rules:** at most **one tree per platform cluster**, on the **best cell near the footprint center** (center first; if that fails clearance, next-nearest tile). Trees **never** spawn on occupied cells. Clearance only requires **at least one exposed side** (ledge / step) — tiles beside taller platforms are allowed so trees still appear on climb routes. Valid spots are **nudged toward open ledges** (`surfaceTilePassesTreeSpawnClearance` in `TerrainLayout.ts`).
 
 ## If a slot is skipped
 
