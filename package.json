@@ -10,10 +10,13 @@
     "plants:pack": "node scripts/pack-curated-plants.mjs",
     "trees:extract": "node scripts/extract-curated-trees.mjs",
     "trees:list": "node scripts/extract-curated-trees.mjs --list",
-    "gltf:list-animations": "node scripts/list-glb-animations.mjs"
+    "gltf:list-animations": "node scripts/list-glb-animations.mjs",
+    "planets:fbx2glb": "node scripts/convert-planet-fbx.mjs",
+    "planets:extract-unity-textures": "node scripts/extract-lowpoly-planets-unity-textures.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.183.1",
+    "fbx2gltf": "^0.9.7-p1",
     "typescript": "~5.9.3",
     "vite": "^8.0.1"
   },

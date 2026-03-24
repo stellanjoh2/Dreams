@@ -11,6 +11,7 @@ import {
   FISHING_BOAT_PLACEMENT_RIGHT,
 } from './FishingBoatProp';
 import { MountainBackdropProp } from './MountainBackdropProp';
+import { DistantPlanetsBackdrop } from './DistantPlanetsBackdrop';
 import { ButterflyScatterSystem } from './ButterflyScatterSystem';
 import { CactusEnemySystem } from './CactusEnemySystem';
 import { createDistantWorldBackdrop, updateDistantWorldBackdropMotion } from './DistantWorldBackdrop';
@@ -87,6 +88,7 @@ export class WorldManager {
   private readonly fishingBoatRight = new FishingBoatProp(this.worldRoot, FISHING_BOAT_PLACEMENT_RIGHT);
   private readonly fishingBoatLeft = new FishingBoatProp(this.worldRoot, FISHING_BOAT_PLACEMENT_LEFT);
   private readonly mountainBackdrop = new MountainBackdropProp(this.worldRoot);
+  private readonly distantPlanets = new DistantPlanetsBackdrop(this.worldRoot);
   private readonly terrain = new TerrainGenerator();
   private readonly terrainPhysics = new TerrainPhysics();
   private readonly cactusEnemies: CactusEnemySystem;
@@ -157,6 +159,7 @@ export class WorldManager {
     this.fishingBoatRight.load();
     this.fishingBoatLeft.load();
     this.mountainBackdrop.load();
+    this.distantPlanets.load();
     this.seedDecorOccupancyFromWorldProps();
     this.worldRoot.add(this.plantScatterRoot);
     this.buildLandmarks();

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RenderPipeline, WebGPURenderer } from 'three/webgpu';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { mix, mrt, normalView, output, pass, saturation, smoothstep, uniform, uv, vec2, vec4 } from 'three/tsl';
+import { float, mix, mrt, normalView, output, pass, saturation, smoothstep, uniform, uv, vec2, vec4 } from 'three/tsl';
 import type { FxSettings } from './FxSettings';
 
 export class PostProcessingPipeline {
@@ -44,7 +44,8 @@ export class PostProcessingPipeline {
     this.aoNode.distanceExponent.value = 1.15;
     this.aoNode.distanceFallOff.value = 0.78;
     this.aoNode.scale.value = 1.0;
-    this.aoNode.resolutionScale = 0.5;
+    /** Slightly above 0.5 reduces blocky GTAO on large curved surfaces (e.g. distant planets). */
+    this.aoNode.resolutionScale = 0.65;
     this.bloomNode = bloom(
       scenePassColor,
       settings.bloom.strength,
@@ -52,7 +53,11 @@ export class PostProcessingPipeline {
       settings.bloom.threshold,
     );
 
-    const aoFactor = this.aoNode.getTextureNode().r.clamp(0.68, 1);
+    const linearDepth = this.scenePass.getLinearDepthNode('depth');
+    /** Fade GTAO to none on mid–far depth so huge backdrop meshes are not speckled (not draw-distance culling). */
+    const aoFarBlend = smoothstep(float(0.18), float(0.62), linearDepth);
+    const aoSample = this.aoNode.getTextureNode().r.clamp(0.68, 1);
+    const aoFactor = mix(aoSample, float(1), aoFarBlend);
     const aoLitColor = scenePassColor.rgb.mul(aoFactor);
     const postBloomColor = aoLitColor.add(this.bloomNode).rgb;
     const contrastedColor = postBloomColor.sub(0.5).mul(this.contrastNode).add(0.5);
