@@ -14,7 +14,11 @@ import { MountainBackdropProp } from './MountainBackdropProp';
 import { DistantPlanetsBackdrop } from './DistantPlanetsBackdrop';
 import { ButterflyScatterSystem } from './ButterflyScatterSystem';
 import { CactusEnemySystem } from './CactusEnemySystem';
-import { createDistantWorldBackdrop, updateDistantWorldBackdropMotion } from './DistantWorldBackdrop';
+import {
+  createDistantWorldBackdrop,
+  getBackdropFarFrameMetrics,
+  updateDistantWorldBackdropMotion,
+} from './DistantWorldBackdrop';
 import { buildStylizedCloudRing, updateStylizedCloudRing, type OrbitalCloud } from './StylizedCloudRing';
 import { TerrainGenerator } from './TerrainGenerator';
 import { TerrainPhysics, type GroundSupportSample } from './TerrainPhysics';
@@ -32,6 +36,7 @@ import {
 } from './TerrainLayout';
 import type { CrystalInstance } from '../systems/CrystalSystem';
 import { publicUrl } from '../config/publicUrl';
+import { MOUNTAIN_ORBIT_MARGIN_BLOCKS, MOUNTAIN_SPAWN_EXTRA_MARGIN_BLOCKS } from './worldHorizon';
 
 type GroundScatterPlacement = {
   variantIndex: number;
@@ -66,6 +71,13 @@ export class WorldManager {
   /** Inner group: uniform fit scale + per-tile jitter scale; pivot offset lives here so root scale does not shear the pivot. */
   private static readonly PLANT_MESH_ROOT_NAME = 'PlantMeshRoot';
   private static readonly ENVIRONMENT_MAP_URL = publicUrl('hdri/MR_EXT-010_BlueEndDayPinkClouds_Moorea_4k.png');
+  /** Visual scale for `buildSun` (pulse multiplies this each frame). */
+  private static readonly SUN_MESH_BASE_SCALE = 1.24;
+  /**
+   * Hint XZ (world) for which compass sector the sun sits in; anchor length is recomputed from backdrop
+   * metrics so the disk sits **past** the mountain ring.
+   */
+  private static readonly SUN_AZIMUTH_HINT_XZ = new THREE.Vector2(-32, 84);
   private static readonly CURATED_PLANT_PROFILES: readonly CuratedPlantProfile[] = [
     { url: publicUrl('plants/curated/candy-bloom-a.glb'), bucket: 'balanced', scale: 1.18 },
     { url: publicUrl('plants/curated/candy-bloom-b.glb'), bucket: 'balanced', scale: 1.08 },
@@ -97,10 +109,12 @@ export class WorldManager {
   private distantBackdrop: THREE.Group | null = null;
   private orbitalClouds: OrbitalCloud[] = [];
   private cloudRingGroup?: THREE.Group;
-  private readonly sunAnchor = new THREE.Vector3(-32, 42, 84);
+  private readonly sunAnchor = new THREE.Vector3();
   private readonly sunTargetPosition = new THREE.Vector3(0, 4, -10);
 
-  private sunMesh?: THREE.Mesh;
+  private sunGroup?: THREE.Group;
+  /** Single camera-facing disc: radial gradient (no separate core vs halo). */
+  private sunSprite?: THREE.Sprite;
   private skyDome?: THREE.Mesh;
   private ambientLight?: THREE.AmbientLight;
   private hemiLight?: THREE.HemisphereLight;
@@ -150,6 +164,7 @@ export class WorldManager {
 
     this.loadEnvironmentMap();
     this.buildSkyDome();
+    this.updateSunAnchorFromBackdrop();
     this.buildLights(settings);
     this.buildSun();
     this.distantBackdrop = createDistantWorldBackdrop();
@@ -208,9 +223,9 @@ export class WorldManager {
       updateStylizedCloudRing(this.orbitalClouds, this.cloudRingGroup, delta, elapsed);
     }
 
-    if (this.sunMesh) {
+    if (this.sunGroup) {
       const pulse = 1 + Math.sin(elapsed * 0.45) * 0.03;
-      this.sunMesh.scale.setScalar(0.38 * pulse);
+      this.sunGroup.scale.setScalar(WorldManager.SUN_MESH_BASE_SCALE * pulse);
     }
 
     this.ambientDust.update(elapsed, camera);
@@ -255,13 +270,13 @@ export class WorldManager {
       this.hemiLight.intensity = settings.atmosphere.hemiIntensity;
     }
 
-    if (this.sunMesh?.material instanceof THREE.MeshBasicMaterial) {
-      this.sunMesh.material.color.set('#fff3be');
+    if (this.sunSprite?.material instanceof THREE.SpriteMaterial) {
+      this.sunSprite.material.color.set('#ffe8c8');
     }
 
     if (this.sunLight) {
-      this.sunLight.intensity = 2.8 * settings.atmosphere.sunGlow;
-      this.sunLight.color.set('#ffe6b0');
+      this.sunLight.intensity = 3.45 * settings.atmosphere.sunGlow;
+      this.sunLight.color.set('#ffd6a0');
     }
 
     this.ambientDust.applySettings(settings.particles);
@@ -292,16 +307,21 @@ export class WorldManager {
   }
 
   getSunWorldPosition(target = new THREE.Vector3()): THREE.Vector3 {
-    if (!this.sunMesh) {
+    if (!this.sunSprite) {
       return target.set(0, 26, -90);
     }
 
-    this.sunMesh.getWorldPosition(this.sunWorldPosition);
+    this.sunSprite.getWorldPosition(this.sunWorldPosition);
     return target.copy(this.sunWorldPosition);
   }
 
   getLensFlareOccluders(): THREE.Object3D[] {
     return [this.worldRoot];
+  }
+
+  /** Mountains only — avoids treating nearby terrain/candy as blocking the sun flare. */
+  getSunFlareOccluders(): THREE.Object3D[] {
+    return [this.mountainBackdrop.root];
   }
 
   getGroundHeightAt(x: number, z: number, supportRadius?: number, maxHeight?: number): number | null {
@@ -342,7 +362,7 @@ export class WorldManager {
     );
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#ffe6b0', 2.8 * settings.atmosphere.sunGlow);
+    this.sunLight = new THREE.DirectionalLight('#ffd6a0', 3.45 * settings.atmosphere.sunGlow);
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.set(1536, 1536);
     this.sunLight.shadow.bias = -0.00008;
@@ -367,15 +387,80 @@ export class WorldManager {
   }
 
   private buildSun(): void {
-    this.sunMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(7.8, 28, 24),
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color('#fff3be'),
-      }),
+    const blobTex = WorldManager.createSunBlobTexture();
+    const mat = new THREE.SpriteMaterial({
+      map: blobTex,
+      color: new THREE.Color('#ffe8c8'),
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+      toneMapped: false,
+    });
+    this.sunSprite = new THREE.Sprite(mat);
+    this.sunSprite.center.set(0.5, 0.5);
+    this.sunSprite.scale.set(132, 132, 1);
+    this.sunSprite.renderOrder = 50;
+
+    this.sunGroup = new THREE.Group();
+    this.sunGroup.add(this.sunSprite);
+    this.sunGroup.position.copy(this.sunAnchor);
+    this.sunGroup.scale.setScalar(WorldManager.SUN_MESH_BASE_SCALE);
+    this.scene.add(this.sunGroup);
+  }
+
+  /** One smooth radial falloff: bright opaque core → soft edge (no “donut” or second disk). */
+  private static createSunBlobTexture(): THREE.CanvasTexture {
+    const s = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = s;
+    canvas.height = s;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return new THREE.CanvasTexture(canvas);
+    }
+    const c = s / 2;
+    const g = ctx.createRadialGradient(c, c, 0, c, c, c);
+    g.addColorStop(0, 'rgba(255, 252, 245, 1)');
+    g.addColorStop(0.05, 'rgba(255, 248, 228, 1)');
+    g.addColorStop(0.14, 'rgba(255, 238, 205, 0.96)');
+    g.addColorStop(0.28, 'rgba(255, 224, 175, 0.8)');
+    g.addColorStop(0.46, 'rgba(255, 205, 145, 0.52)');
+    g.addColorStop(0.66, 'rgba(255, 185, 115, 0.26)');
+    g.addColorStop(0.86, 'rgba(255, 165, 95, 0.08)');
+    g.addColorStop(1, 'rgba(255, 150, 80, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, s, s);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  /**
+   * Park the sun **outside** the mountain orbit (same basis as `MountainBackdropProp`) so depth tests
+   * draw silhouettes in front of the disk while light direction stays similar.
+   */
+  private updateSunAnchorFromBackdrop(): void {
+    const { centerX, centerZ, farOuterR } = getBackdropFarFrameMetrics();
+    const orbitBase = farOuterR + BLOCK_UNIT * MOUNTAIN_ORBIT_MARGIN_BLOCKS;
+    const orbitMax = orbitBase + BLOCK_UNIT * MOUNTAIN_SPAWN_EXTRA_MARGIN_BLOCKS;
+    /**
+     * Just past the farthest mountain pivot (not a full mesh radius beyond it): far enough to read
+     * “behind” the ring, close enough that the disk isn’t always depth-occluded / sub-pixel.
+     */
+    const radial = orbitMax + BLOCK_UNIT * 52;
+
+    const inPlane = new THREE.Vector3(
+      WorldManager.SUN_AZIMUTH_HINT_XZ.x - centerX,
+      0,
+      WorldManager.SUN_AZIMUTH_HINT_XZ.y - centerZ,
     );
-    this.sunMesh.scale.setScalar(0.38);
-    this.sunMesh.position.copy(this.sunAnchor);
-    this.scene.add(this.sunMesh);
+    if (inPlane.lengthSq() < 4) {
+      inPlane.set(-1, 0, 1);
+    }
+    inPlane.normalize();
+
+    this.sunAnchor.set(centerX + inPlane.x * radial, 112, centerZ + inPlane.z * radial);
   }
 
   private buildSkyDome(): void {

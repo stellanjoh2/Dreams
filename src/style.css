@@ -120,6 +120,33 @@ a {
   opacity: 1;
 }
 
+/* Sun: replace long anamorphic streak with soft wash; ghosts carry the read. */
+.lens-flare-root--sun .lens-flare-streak--primary {
+  height: 26px;
+  filter: blur(26px);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 236, 200, 0.12) 18%,
+    rgba(255, 255, 255, 0.38) 50%,
+    rgba(255, 220, 200, 0.12) 82%,
+    transparent 100%
+  );
+}
+
+.lens-flare-root--sun .lens-flare-streak--secondary {
+  height: 20px;
+  filter: blur(32px);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.08) 22%,
+    rgba(255, 245, 220, 0.22) 50%,
+    rgba(var(--lens-flare-rgb), 0.08) 78%,
+    transparent 100%
+  );
+}
+
 /* Secondary flare for bright emissive props (jump pads, crystals); slightly smaller core bloom. */
 .lens-flare-root--emissive .lens-flare-halo {
   width: 168px;
@@ -172,52 +199,176 @@ a {
 }
 
 .lens-flare-halo {
-  width: 270px;
-  height: 270px;
-  background:
-    radial-gradient(circle, rgba(255, 255, 255, 0.98) 0%, var(--lens-flare-strong) 12%,
-      rgba(255, 250, 226, 0.42) 26%, rgba(255, 238, 191, 0.14) 52%, transparent 74%);
-  filter: blur(2px);
+  width: 380px;
+  height: 380px;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.92) 0%,
+    var(--lens-flare-strong) 8%,
+    rgba(255, 248, 220, 0.38) 22%,
+    rgba(255, 232, 190, 0.16) 38%,
+    rgba(255, 220, 170, 0.06) 55%,
+    rgba(255, 210, 160, 0.02) 72%,
+    transparent 88%
+  );
+  filter: blur(7px);
 }
 
 .lens-flare-ring {
-  width: 188px;
-  height: 188px;
-  border: 2px solid rgba(255, 255, 255, 0.24);
-  background: radial-gradient(circle, transparent 44%, rgba(var(--lens-flare-rgb), 0.08) 58%, transparent 72%);
-  box-shadow: 0 0 32px rgba(var(--lens-flare-rgb), 0.1);
+  width: 260px;
+  height: 260px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: radial-gradient(circle, transparent 48%, rgba(var(--lens-flare-rgb), 0.07) 62%, transparent 78%);
+  box-shadow: 0 0 64px rgba(var(--lens-flare-rgb), 0.1);
 }
 
 .lens-flare-streak {
   border-radius: 999px;
   transform: translate(-50%, -50%);
-  height: 12px;
+  height: 16px;
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 232, 176, 0.12) 10%,
-    rgba(255, 255, 255, 0.82) 50%,
-    rgba(255, 201, 224, 0.14) 88%,
+    rgba(255, 232, 176, 0.22) 10%,
+    rgba(255, 255, 255, 0.92) 50%,
+    rgba(255, 201, 224, 0.22) 88%,
     transparent 100%
   );
-  filter: blur(7px);
+  filter: blur(8px);
 }
 
 .lens-flare-streak--primary {
-  height: 12px;
+  height: 16px;
 }
 
 .lens-flare-streak--secondary {
-  height: 8px;
-  filter: blur(10px);
+  height: 11px;
+  filter: blur(12px);
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.08) 18%,
-    rgba(255, 255, 255, 0.3) 50%,
-    rgba(var(--lens-flare-rgb), 0.08) 82%,
+    rgba(255, 255, 255, 0.14) 18%,
+    rgba(255, 255, 255, 0.42) 50%,
+    rgba(var(--lens-flare-rgb), 0.14) 82%,
     transparent 100%
   );
+}
+
+/* Far green ghost: soft spherical bloom only (no wedge / streak). */
+.lens-flare-green-ghost-halo {
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(180, 255, 210, 0.42) 0%,
+    rgba(100, 235, 190, 0.22) 38%,
+    rgba(60, 200, 170, 0.08) 58%,
+    transparent 76%
+  );
+  filter: blur(12px);
+  mix-blend-mode: screen;
+}
+
+.lens-flare-ghost {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.lens-flare-ghost--warm-lg {
+  width: 300px;
+  height: 300px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 210, 140, 0.38) 0%,
+    rgba(255, 165, 90, 0.16) 32%,
+    rgba(255, 120, 60, 0.06) 52%,
+    transparent 70%
+  );
+  filter: blur(16px);
+  mix-blend-mode: screen;
+}
+
+.lens-flare-ghost--warm-md {
+  width: 190px;
+  height: 190px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 195, 120, 0.42) 0%,
+    rgba(255, 140, 70, 0.2) 38%,
+    rgba(220, 90, 50, 0.08) 58%,
+    transparent 76%
+  );
+  filter: blur(10px);
+  mix-blend-mode: screen;
+}
+
+.lens-flare-ghost--purple-wedge {
+  width: 56px;
+  height: 56px;
+  background: linear-gradient(128deg, rgba(210, 140, 255, 0.5) 0%, rgba(140, 80, 200, 0.22) 45%, transparent 78%);
+  clip-path: polygon(8% 6%, 96% 22%, 58% 98%, 4% 82%);
+  filter: blur(2px);
+  mix-blend-mode: screen;
+}
+
+.lens-flare-ghost--faint {
+  width: 480px;
+  height: 480px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(130, 55, 45, 0.1) 0%,
+    rgba(85, 35, 28, 0.05) 42%,
+    transparent 72%
+  );
+  filter: blur(32px);
+  mix-blend-mode: screen;
+}
+
+.lens-flare-ghost--spark {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(255, 235, 200, 0.42) 42%,
+    rgba(255, 200, 140, 0.12) 62%,
+    transparent 78%
+  );
+  filter: blur(1.2px);
+  mix-blend-mode: screen;
+}
+
+/* Chromatic bar ghost along flare axis (skew applied in JS). Base size ×2; JS scale adds visibility. */
+.lens-flare-prism {
+  position: absolute;
+  width: 468px;
+  height: 90px;
+  border-radius: 11px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(95, 45, 200, 0.88) 0%,
+    rgba(70, 110, 255, 0.9) 12%,
+    rgba(80, 220, 255, 0.88) 24%,
+    rgba(100, 255, 180, 0.82) 38%,
+    rgba(255, 255, 140, 0.78) 52%,
+    rgba(255, 200, 90, 0.82) 66%,
+    rgba(255, 120, 70, 0.88) 80%,
+    rgba(255, 55, 65, 0.9) 100%
+  );
+  box-shadow:
+    0 0 58px rgba(255, 200, 140, 0.32),
+    0 0 98px rgba(120, 180, 255, 0.18);
+  filter: blur(1.5px);
+  mix-blend-mode: screen;
 }
 
 .crosshair {

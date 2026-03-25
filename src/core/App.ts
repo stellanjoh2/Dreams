@@ -98,6 +98,7 @@ export class App {
     );
     this.lensFlare = new LensFlareOverlay(this.ui.fxMount);
     this.lensFlare.setOcclusionObjects(this.world.getLensFlareOccluders());
+    this.lensFlare.setSunOcclusionObjects(this.world.getSunFlareOccluders());
 
     this.applySettings();
     this.ui.setChromeVisible(false);
@@ -161,7 +162,7 @@ export class App {
     this.postProcessing?.applySettings(this.settings);
     this.reapplyAudioVolumes();
     this.editor?.sync();
-    this.lensFlare?.setColor('#ffd39f');
+    this.lensFlare?.setColor('#ffc090');
     this.lensFlare?.setIntensity(this.settings.atmosphere.sunGlow);
 
     localStorage.setItem(FX_SETTINGS_STORAGE_KEY, JSON.stringify(this.settings));

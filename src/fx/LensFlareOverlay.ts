@@ -10,13 +10,16 @@ type OrbDef = {
 };
 
 const ORBS: OrbDef[] = [
-  { ratio: 0, size: 220, blur: 1, opacity: 1, scaleBoost: 0.46 },
-  { ratio: 0.14, size: 68, blur: 0, opacity: 0.34, scaleBoost: 0.18 },
-  { ratio: 0.3, size: 128, blur: 3, opacity: 0.18, scaleBoost: 0.24 },
-  { ratio: 0.54, size: 88, blur: 1, opacity: 0.2, scaleBoost: 0.15 },
-  { ratio: 0.82, size: 156, blur: 5, opacity: 0.12, scaleBoost: 0.28 },
-  { ratio: 1.12, size: 94, blur: 0, opacity: 0.18, scaleBoost: 0.12 },
+  { ratio: 0, size: 280, blur: 5, opacity: 0.72, scaleBoost: 0.44 },
+  { ratio: 0.14, size: 96, blur: 0, opacity: 0.48, scaleBoost: 0.22 },
+  { ratio: 0.3, size: 176, blur: 3.5, opacity: 0.3, scaleBoost: 0.3 },
+  { ratio: 0.54, size: 118, blur: 1.2, opacity: 0.34, scaleBoost: 0.2 },
+  { ratio: 0.82, size: 210, blur: 6, opacity: 0.22, scaleBoost: 0.34 },
+  { ratio: 1.12, size: 128, blur: 0, opacity: 0.28, scaleBoost: 0.16 },
 ];
+
+/** Multiplies sun ghost pixel sizes from `ORBS` (emissive flare keeps its own scale). */
+const SUN_FLARE_ORB_PIXEL_SCALE = 1.42;
 
 /** World-space emissive sources (jump pads, crystals, etc.) that can drive a secondary flare. */
 export type LensFlareEmissiveCandidate = {
@@ -37,15 +40,30 @@ type FlareElements = {
   streakPrimary: HTMLDivElement;
   streakSecondary: HTMLDivElement;
   orbs: HTMLDivElement[];
+  /** Sun-only extras */
+  prism?: HTMLDivElement;
+  greenGhostHalo?: HTMLDivElement;
+  sunGhostWarmLg?: HTMLDivElement;
+  sunGhostWarmMd?: HTMLDivElement;
+  sunGhostPurple?: HTMLDivElement;
+  sunGhostFaintA?: HTMLDivElement;
+  sunGhostFaintB?: HTMLDivElement;
+  sunGhostSparkA?: HTMLDivElement;
+  sunGhostSparkB?: HTMLDivElement;
 };
 
 const EMISSIVE_ORB_SCALE = 0.58;
 /** World units: geometry at the flare anchor (pad top, crystal) must not count as “blocking”. */
 const EMISSIVE_OCCLUSION_MARGIN = 0.45;
 
-function buildFlareElements(mount: HTMLElement, rootClass: string, orbSizeScale: number): FlareElements {
+function buildFlareElements(
+  mount: HTMLElement,
+  rootClass: string,
+  orbSizeScale: number,
+  sunCinematic = false,
+): FlareElements {
   const root = document.createElement('div');
-  root.className = rootClass;
+  root.className = sunCinematic ? `${rootClass} lens-flare-root--sun` : rootClass;
 
   const dirt = document.createElement('div');
   dirt.className = 'lens-flare-dirt';
@@ -79,8 +97,72 @@ function buildFlareElements(mount: HTMLElement, rootClass: string, orbSizeScale:
     root.append(element);
   }
 
+  let prism: HTMLDivElement | undefined;
+  let greenGhostHalo: HTMLDivElement | undefined;
+  let sunGhostWarmLg: HTMLDivElement | undefined;
+  let sunGhostWarmMd: HTMLDivElement | undefined;
+  let sunGhostPurple: HTMLDivElement | undefined;
+  let sunGhostFaintA: HTMLDivElement | undefined;
+  let sunGhostFaintB: HTMLDivElement | undefined;
+  let sunGhostSparkA: HTMLDivElement | undefined;
+  let sunGhostSparkB: HTMLDivElement | undefined;
+  if (sunCinematic) {
+    sunGhostSparkA = document.createElement('div');
+    sunGhostSparkA.className = 'lens-flare-ghost lens-flare-ghost--spark';
+    root.append(sunGhostSparkA);
+
+    sunGhostWarmLg = document.createElement('div');
+    sunGhostWarmLg.className = 'lens-flare-ghost lens-flare-ghost--warm-lg';
+    root.append(sunGhostWarmLg);
+
+    sunGhostFaintA = document.createElement('div');
+    sunGhostFaintA.className = 'lens-flare-ghost lens-flare-ghost--faint';
+    root.append(sunGhostFaintA);
+
+    greenGhostHalo = document.createElement('div');
+    greenGhostHalo.className = 'lens-flare-ghost lens-flare-green-ghost-halo';
+    root.append(greenGhostHalo);
+
+    sunGhostWarmMd = document.createElement('div');
+    sunGhostWarmMd.className = 'lens-flare-ghost lens-flare-ghost--warm-md';
+    root.append(sunGhostWarmMd);
+
+    sunGhostPurple = document.createElement('div');
+    sunGhostPurple.className = 'lens-flare-ghost lens-flare-ghost--purple-wedge';
+    root.append(sunGhostPurple);
+
+    prism = document.createElement('div');
+    prism.className = 'lens-flare-prism';
+    root.append(prism);
+
+    sunGhostFaintB = document.createElement('div');
+    sunGhostFaintB.className = 'lens-flare-ghost lens-flare-ghost--faint';
+    root.append(sunGhostFaintB);
+
+    sunGhostSparkB = document.createElement('div');
+    sunGhostSparkB.className = 'lens-flare-ghost lens-flare-ghost--spark';
+    root.append(sunGhostSparkB);
+  }
+
   mount.append(root);
-  return { root, dirt, halo, ring, streakPrimary, streakSecondary, orbs };
+  return {
+    root,
+    dirt,
+    halo,
+    ring,
+    streakPrimary,
+    streakSecondary,
+    orbs,
+    prism,
+    greenGhostHalo,
+    sunGhostWarmLg,
+    sunGhostWarmMd,
+    sunGhostPurple,
+    sunGhostFaintA,
+    sunGhostFaintB,
+    sunGhostSparkA,
+    sunGhostSparkB,
+  };
 }
 
 function applyFlareColor(
@@ -88,12 +170,13 @@ function applyFlareColor(
   orbs: HTMLDivElement[],
   hex: string,
   orbHighlightAlpha: [number, number] = [0.92, 0.52],
+  dramatic = false,
 ): void {
   const color = new THREE.Color(hex);
   const rgb = `${Math.round(color.r * 255)}, ${Math.round(color.g * 255)}, ${Math.round(color.b * 255)}`;
-  const strong = `rgba(${rgb}, 0.84)`;
-  const mid = `rgba(${rgb}, 0.34)`;
-  const soft = `rgba(${rgb}, 0.14)`;
+  const strong = `rgba(${rgb}, ${dramatic ? 0.94 : 0.84})`;
+  const mid = `rgba(${rgb}, ${dramatic ? 0.48 : 0.34})`;
+  const soft = `rgba(${rgb}, ${dramatic ? 0.22 : 0.14})`;
 
   root.style.setProperty('--lens-flare-strong', strong);
   root.style.setProperty('--lens-flare-mid', mid);
@@ -101,7 +184,12 @@ function applyFlareColor(
   root.style.setProperty('--lens-flare-rgb', rgb);
 
   orbs.forEach((orb, index) => {
-    const alpha = index === 0 ? orbHighlightAlpha[0] : orbHighlightAlpha[1];
+    const alpha =
+      index === 0
+        ? orbHighlightAlpha[0]
+        : dramatic
+          ? Math.min(0.72, orbHighlightAlpha[1] + 0.12)
+          : orbHighlightAlpha[1];
     orb.style.background = `radial-gradient(circle, rgba(255,255,255,${alpha}) 0%, ${strong} 20%, ${mid} 46%, ${soft} 68%, transparent 100%)`;
   });
 }
@@ -117,7 +205,9 @@ export class LensFlareOverlay {
   private readonly raycaster = new THREE.Raycaster();
   private readonly intersections: THREE.Intersection[] = [];
   private occlusionObjects: THREE.Object3D[] | null = null;
-  private color = '#ffdba0';
+  /** If set, used only for **sun** flare occlusion (e.g. mountains). Emissive still uses `occlusionObjects`. */
+  private sunOcclusionObjects: THREE.Object3D[] | null = null;
+  private color = '#ffcc98';
   private intensity = 1;
   private visibility = 0;
   private targetVisibility = 0;
@@ -129,10 +219,10 @@ export class LensFlareOverlay {
   private lastEmissiveColor = '';
 
   constructor(mount: HTMLElement) {
-    this.sun = buildFlareElements(mount, 'lens-flare-root', 1);
-    this.emissive = buildFlareElements(mount, 'lens-flare-root lens-flare-root--emissive', EMISSIVE_ORB_SCALE);
+    this.sun = buildFlareElements(mount, 'lens-flare-root', SUN_FLARE_ORB_PIXEL_SCALE, true);
+    this.emissive = buildFlareElements(mount, 'lens-flare-root lens-flare-root--emissive', EMISSIVE_ORB_SCALE, false);
     this.setColor(this.color);
-    applyFlareColor(this.emissive.root, this.emissive.orbs, '#d8f6ff', [0.88, 0.48]);
+    applyFlareColor(this.emissive.root, this.emissive.orbs, '#d8f6ff', [0.88, 0.48], false);
     this.lastEmissiveColor = '#d8f6ff';
     if (!ENABLE_EMISSIVE_LENS_FLARE) {
       this.emissive.root.style.display = 'none';
@@ -141,7 +231,7 @@ export class LensFlareOverlay {
 
   setColor(hex: string): void {
     this.color = hex;
-    applyFlareColor(this.sun.root, this.sun.orbs, hex);
+    applyFlareColor(this.sun.root, this.sun.orbs, hex, [0.96, 0.58], true);
   }
 
   setIntensity(value: number): void {
@@ -150,6 +240,10 @@ export class LensFlareOverlay {
 
   setOcclusionObjects(objects: THREE.Object3D[] | null): void {
     this.occlusionObjects = objects && objects.length > 0 ? objects : null;
+  }
+
+  setSunOcclusionObjects(objects: THREE.Object3D[] | null): void {
+    this.sunOcclusionObjects = objects && objects.length > 0 ? objects : null;
   }
 
   update(
@@ -222,12 +316,12 @@ export class LensFlareOverlay {
     const distanceFromCenter = this.center.distanceTo(this.sunScreen) / Math.max(viewportWidth, viewportHeight);
     const edgeFade = THREE.MathUtils.clamp(1 - distanceFromCenter * 0.92, 0, 1);
     const boundsFade = THREE.MathUtils.clamp(1.2 - Math.max(Math.abs(this.projected.x), Math.abs(this.projected.y)), 0, 1);
-    const baseVisibility = edgeFade * boundsFade * this.intensity;
+    const baseVisibility = edgeFade * boundsFade * this.intensity * 1.22;
 
     const now = this.getNowSeconds();
     if (now - this.lastSunOcclusionCheckTime >= 0.075) {
       this.lastSunOcclusionCheckTime = now;
-      this.sunOccluded = this.checkOcclusion(camera, worldTarget);
+      this.sunOccluded = this.checkSunOcclusion(camera, worldTarget);
     }
     this.targetVisibility = this.sunOccluded ? 0 : baseVisibility;
 
@@ -247,6 +341,7 @@ export class LensFlareOverlay {
       sunX,
       sunY,
       viewportWidth,
+      viewportHeight,
       distanceFromCenter,
       this.visibility,
       1,
@@ -357,7 +452,7 @@ export class LensFlareOverlay {
     const tint = c.color ?? '#e2f4ff';
     if (tint !== this.lastEmissiveColor) {
       this.lastEmissiveColor = tint;
-      applyFlareColor(this.emissive.root, this.emissive.orbs, tint, [0.9, 0.5]);
+      applyFlareColor(this.emissive.root, this.emissive.orbs, tint, [0.9, 0.5], false);
     }
 
     this.emissive.root.classList.add('is-visible');
@@ -368,6 +463,7 @@ export class LensFlareOverlay {
       sunX,
       sunY,
       viewportWidth,
+      viewportHeight,
       distanceFromCenter,
       this.emissiveVisibility,
       EMISSIVE_ORB_SCALE,
@@ -379,6 +475,7 @@ export class LensFlareOverlay {
     sunX: number,
     sunY: number,
     viewportWidth: number,
+    viewportHeight: number,
     distanceFromCenter: number,
     visibility: number,
     globalScale: number,
@@ -386,47 +483,172 @@ export class LensFlareOverlay {
     const dirX = this.center.x - sunX;
     const dirY = this.center.y - sunY;
     const angle = Math.atan2(dirY, dirX) * (180 / Math.PI);
+    const dirLen = Math.hypot(dirX, dirY) || 1;
+    const perpX = (-dirY / dirLen) * 140;
+    const perpY = (dirX / dirLen) * 140;
     const distanceNorm = THREE.MathUtils.clamp(distanceFromCenter, 0, 1);
     const shimmer = 0.96 + Math.sin(this.getNowSeconds() * 2.2) * 0.02;
 
     const g = globalScale;
-    this.placeOrb(elements.halo, sunX, sunY, (1.08 + visibility * 0.45) * g, 0.72 * visibility);
-    this.placeOrb(elements.ring, sunX, sunY, (0.94 + visibility * 0.26) * g, 0.3 * visibility);
+    const sunAxisFlare = elements.prism != null;
+    const orbChainBoost = sunAxisFlare ? 1.24 : 1;
+
+    if (sunAxisFlare) {
+      this.placeOrb(elements.halo, sunX, sunY, (1.05 + visibility * 0.48) * g, 0);
+      this.placeOrb(elements.ring, sunX, sunY, (0.98 + visibility * 0.28) * g, 0);
+    } else {
+      this.placeOrb(
+        elements.halo,
+        sunX,
+        sunY,
+        (1.05 + visibility * 0.48) * g,
+        0.78 * visibility,
+      );
+      this.placeOrb(
+        elements.ring,
+        sunX,
+        sunY,
+        (0.98 + visibility * 0.28) * g,
+        0.28 * visibility,
+      );
+    }
 
     ORBS.forEach((orb, index) => {
       const el = elements.orbs[index];
       const x = sunX + dirX * orb.ratio;
       const y = sunY + dirY * orb.ratio;
-      const scale = shimmer * (0.82 + visibility * orb.scaleBoost * (1 - orb.ratio * 0.22)) * g;
+      const scale = shimmer * (0.88 + visibility * orb.scaleBoost * (1 - orb.ratio * 0.18)) * g;
+
+      const onSunDisk = sunAxisFlare && orb.ratio < 0.02;
+      const orbMul = onSunDisk ? 0 : orbChainBoost;
 
       el.style.left = `${x}px`;
       el.style.top = `${y}px`;
-      el.style.opacity = String(orb.opacity * visibility * (1 - distanceNorm * 0.2));
+      el.style.opacity = String(
+        Math.min(
+          1,
+          orb.opacity * visibility * 1.12 * orbMul * (1 - distanceNorm * 0.14),
+        ),
+      );
       el.style.transform = `translate(-50%, -50%) scale(${scale})`;
     });
 
-    const streakWidth = viewportWidth * (0.46 + visibility * 0.08) * g;
-    this.placeStreak(elements.streakPrimary, sunX, sunY, angle, streakWidth, 0.52 * visibility, 1 * g);
+    const streakDim = sunAxisFlare ? 0 : 1;
+    const streakW = sunAxisFlare ? 0.28 : 1;
+    const streakWidth = viewportWidth * (0.58 + visibility * 0.12) * g * streakW;
+    this.placeStreak(
+      elements.streakPrimary,
+      sunX,
+      sunY,
+      angle,
+      streakWidth,
+      0.72 * visibility * streakDim,
+      1.12 * g,
+    );
     this.placeStreak(
       elements.streakSecondary,
       sunX,
       sunY,
       angle + 90,
-      viewportWidth * 0.19 * g,
-      0.18 * visibility,
-      (0.86 + visibility * 0.18) * g,
+      viewportWidth * 0.26 * g * streakW,
+      0.3 * visibility * streakDim * 0.85,
+      (0.95 + visibility * 0.22) * g,
     );
 
     const edgeFade = THREE.MathUtils.clamp(1 - distanceFromCenter * 0.92, 0, 1);
     const dirtDriftX = dirX * 0.04;
     const dirtDriftY = dirY * 0.04;
-    elements.dirt.style.opacity = String(0.16 * visibility * (0.65 + edgeFade * 0.35));
+    elements.dirt.style.opacity = String(0.26 * visibility * (0.65 + edgeFade * 0.35));
     elements.dirt.style.transform = `translate(${dirtDriftX.toFixed(2)}px, ${dirtDriftY.toFixed(2)}px) scale(${1 + visibility * 0.04})`;
+
+    const v = visibility;
+    const edge = (1 - distanceNorm * 0.14) * v;
+
+    if (elements.sunGhostSparkA) {
+      const r = 0.08;
+      elements.sunGhostSparkA.style.left = `${sunX + dirX * r}px`;
+      elements.sunGhostSparkA.style.top = `${sunY + dirY * r}px`;
+      elements.sunGhostSparkA.style.opacity = String(0.55 * edge);
+      elements.sunGhostSparkA.style.transform = `translate(-50%, -50%) scale(${0.9 + v * 0.2})`;
+    }
+    if (elements.sunGhostWarmLg) {
+      const r = 0.2;
+      elements.sunGhostWarmLg.style.left = `${sunX + dirX * r}px`;
+      elements.sunGhostWarmLg.style.top = `${sunY + dirY * r}px`;
+      elements.sunGhostWarmLg.style.opacity = '0';
+      elements.sunGhostWarmLg.style.transform = `translate(-50%, -50%) scale(${0.92 + v * 0.15})`;
+    }
+    if (elements.sunGhostFaintA) {
+      const r = 0.12;
+      elements.sunGhostFaintA.style.left = `${sunX + dirX * r + perpX * 0.55}px`;
+      elements.sunGhostFaintA.style.top = `${sunY + dirY * r + perpY * 0.55}px`;
+      elements.sunGhostFaintA.style.opacity = String(0.85 * edge);
+      elements.sunGhostFaintA.style.transform = `translate(-50%, -50%) scale(${1.05 + v * 0.08})`;
+    }
+    const greenGhostFar = 1.36;
+    const ggx = sunX + dirX * greenGhostFar;
+    const ggy = sunY + dirY * greenGhostFar;
+    if (elements.greenGhostHalo) {
+      elements.greenGhostHalo.style.left = `${ggx}px`;
+      elements.greenGhostHalo.style.top = `${ggy}px`;
+      elements.greenGhostHalo.style.opacity = String(0.5 * edge);
+      elements.greenGhostHalo.style.transform = `translate(-50%, -50%) scale(${0.96 + v * 0.12})`;
+    }
+    if (elements.sunGhostWarmMd) {
+      const r = 0.76;
+      elements.sunGhostWarmMd.style.left = `${sunX + dirX * r}px`;
+      elements.sunGhostWarmMd.style.top = `${sunY + dirY * r}px`;
+      elements.sunGhostWarmMd.style.opacity = String(0.48 * edge);
+      elements.sunGhostWarmMd.style.transform = `translate(-50%, -50%) scale(${0.9 + v * 0.12})`;
+    }
+    if (elements.sunGhostPurple) {
+      const r = 1.06;
+      elements.sunGhostPurple.style.left = `${sunX + dirX * r}px`;
+      elements.sunGhostPurple.style.top = `${sunY + dirY * r}px`;
+      elements.sunGhostPurple.style.opacity = String(0.5 * edge);
+      elements.sunGhostPurple.style.transform = `translate(-50%, -50%) rotate(${angle + 18}deg) scale(${0.95 + v * 0.1})`;
+    }
+    if (elements.prism) {
+      const pr = 2.14;
+      const prismX = sunX + dirX * pr;
+      const prismY = sunY + dirY * pr;
+      const halfDiag = Math.hypot(viewportWidth, viewportHeight) * 0.5;
+      const distFromScreenCenter = Math.hypot(prismX - this.center.x, prismY - this.center.y);
+      const radialT = THREE.MathUtils.clamp(distFromScreenCenter / (halfDiag * 0.32), 0, 1);
+      const prismCenterFade = radialT * radialT * (3 - 2 * radialT);
+      /** 0 when sun is near viewport center, 1 when sun sits out toward the edges (full “hero” prism). */
+      const prismSunEdge = THREE.MathUtils.smoothstep(distanceNorm, 0.1, 0.34);
+      const prismOpacityMul = THREE.MathUtils.lerp(0.2, 1, prismSunEdge);
+      const prismLenMul = THREE.MathUtils.lerp(0.48, 1, prismSunEdge);
+      const prismThickMul = THREE.MathUtils.lerp(0.36, 1, prismSunEdge);
+      const baseS = 1.1 + v * 0.18;
+      const sx = baseS * prismLenMul;
+      const sy = baseS * prismThickMul;
+      elements.prism.style.left = `${prismX}px`;
+      elements.prism.style.top = `${prismY}px`;
+      elements.prism.style.opacity = String(0.78 * edge * prismCenterFade * prismOpacityMul);
+      elements.prism.style.transform = `translate(-50%, -50%) rotate(${angle}deg) skewX(-12deg) scale(${sx}, ${sy})`;
+    }
+    if (elements.sunGhostFaintB) {
+      const r = 0.36;
+      elements.sunGhostFaintB.style.left = `${sunX + dirX * r - perpX * 0.45}px`;
+      elements.sunGhostFaintB.style.top = `${sunY + dirY * r - perpY * 0.45}px`;
+      elements.sunGhostFaintB.style.opacity = String(0.75 * edge);
+      elements.sunGhostFaintB.style.transform = `translate(-50%, -50%) scale(${1.1 + v * 0.06})`;
+    }
+    if (elements.sunGhostSparkB) {
+      const r = 0.98;
+      elements.sunGhostSparkB.style.left = `${sunX + dirX * r}px`;
+      elements.sunGhostSparkB.style.top = `${sunY + dirY * r}px`;
+      elements.sunGhostSparkB.style.opacity = String(0.5 * edge);
+      elements.sunGhostSparkB.style.transform = `translate(-50%, -50%) scale(${0.85 + v * 0.15})`;
+    }
   }
 
-  /** Sun / sky: any geometry between camera and the target counts as blocked. */
-  private checkOcclusion(camera: THREE.Camera, worldTarget: THREE.Vector3): boolean {
-    if (!this.occlusionObjects || this.occlusionObjects.length === 0) {
+  /** Sun: prefer `sunOcclusionObjects` (mountains) so terrain doesn’t kill the flare. */
+  private checkSunOcclusion(camera: THREE.Camera, worldTarget: THREE.Vector3): boolean {
+    const list = this.sunOcclusionObjects ?? this.occlusionObjects;
+    if (!list || list.length === 0) {
       return false;
     }
 
@@ -440,7 +662,7 @@ export class LensFlareOverlay {
     this.raycaster.near = 0.02;
     this.raycaster.far = dist;
     this.intersections.length = 0;
-    this.raycaster.intersectObjects(this.occlusionObjects, true, this.intersections);
+    this.raycaster.intersectObjects(list, true, this.intersections);
     return this.intersections.some(
       (hit) => hit.object.visible !== false && hit.object.userData?.lensflare !== 'no-occlusion',
     );
