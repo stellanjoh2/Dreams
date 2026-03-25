@@ -24,6 +24,8 @@ export interface GamepadSnapshot {
   run: boolean;
   jump: ButtonState;
   interact: ButtonState;
+  /** Primary attack / sword (e.g. RT on Standard gamepad mapping in many browsers). */
+  primaryAttack: ButtonState;
   toggleEditor: ButtonState;
 }
 
@@ -45,6 +47,7 @@ export class GamepadController {
       run: false,
       jump: createButtonState(),
       interact: createButtonState(),
+      primaryAttack: createButtonState(),
       toggleEditor: createButtonState(),
     };
 
@@ -65,6 +68,7 @@ export class GamepadController {
 
     snapshot.jump = this.readButton(gamepad, 0);
     snapshot.interact = this.readButton(gamepad, 2);
+    snapshot.primaryAttack = this.readButton(gamepad, 7);
     snapshot.toggleEditor = this.readButton(gamepad, 9);
 
     return snapshot;

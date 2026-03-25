@@ -10,6 +10,7 @@ export class InputSystem {
 
   private jumpQueued = false;
   private interactQueued = false;
+  private primaryAttackQueued = false;
   private toggleEditorQueued = false;
 
   private readonly keyboardMove = new THREE.Vector2();
@@ -49,6 +50,10 @@ export class InputSystem {
 
     if (state.interact.justPressed) {
       this.interactQueued = true;
+    }
+
+    if (state.primaryAttack.justPressed) {
+      this.primaryAttackQueued = true;
     }
 
     if (state.toggleEditor.justPressed) {
@@ -100,6 +105,16 @@ export class InputSystem {
   consumeInteract(): boolean {
     const value = this.interactQueued;
     this.interactQueued = false;
+    return value;
+  }
+
+  queuePrimaryAttack(): void {
+    this.primaryAttackQueued = true;
+  }
+
+  consumePrimaryAttack(): boolean {
+    const value = this.primaryAttackQueued;
+    this.primaryAttackQueued = false;
     return value;
   }
 

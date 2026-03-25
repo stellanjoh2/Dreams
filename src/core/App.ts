@@ -17,6 +17,7 @@ import { FX_SETTINGS_STORAGE_KEY, type FxSettings } from '../fx/FxSettings';
 import { FxEditor } from '../editor/FxEditor';
 import { appendJumpPadFlareCandidates } from '../fx/emissiveFlareSources';
 import { LensFlareOverlay, type LensFlareEmissiveCandidate } from '../fx/LensFlareOverlay';
+import { SwordCombatView } from '../combat/SwordCombatView';
 
 const emissiveFlareScratch: LensFlareEmissiveCandidate[] = [];
 
@@ -38,6 +39,7 @@ export class App {
   private postProcessing?: PostProcessingPipeline;
   private editor?: FxEditor;
   private lensFlare?: LensFlareOverlay;
+  private swordCombat?: SwordCombatView;
 
   private lastFrame = 0;
   private readonly cameraPosition = new THREE.Vector3();
@@ -91,6 +93,16 @@ export class App {
     this.player.respawn(this.world.getRespawnPoint(new THREE.Vector3()));
     this.crystalSystem.setCrystals(crystals);
     this.crystalSystem.attachVfxResources(this.world.scene, this.world.getCrystalGeometry());
+
+    this.world.scene.add(this.cameraSystem.camera);
+    this.swordCombat = new SwordCombatView(this.cameraSystem.camera);
+    try {
+      await this.swordCombat.load();
+    } catch (err) {
+      console.warn('[App] Sword GLB failed to load — combat view disabled', err);
+      this.swordCombat.dispose();
+      this.swordCombat = undefined;
+    }
 
     this.interactionSystem = new InteractionSystem(this.crystalSystem, this.ui, this.audio);
     if (USE_POST_PROCESSING) {
@@ -147,6 +159,9 @@ export class App {
     });
 
     canvas.addEventListener('pointerdown', (event) => {
+      if (event.button === 0 && document.pointerLockElement === canvas && !this.editor?.isOpen) {
+        this.input.queuePrimaryAttack();
+      }
       if (event.button === 2) {
         event.preventDefault();
         this.input.setZoomAimHeld(true);
@@ -218,6 +233,14 @@ export class App {
     const elapsed = time / 1000;
 
     this.input.update();
+
+    const combatUiOk = !this.editor?.isOpen;
+    const combatActive = this.cameraSystem.locked && combatUiOk;
+    this.swordCombat?.setVisible(combatActive);
+    this.swordCombat?.update(delta);
+    if (combatActive && this.input.consumePrimaryAttack()) {
+      this.swordCombat?.triggerAttack();
+    }
 
     if (this.input.consumeToggleEditor()) {
       this.editor?.toggle();
