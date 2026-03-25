@@ -24,7 +24,14 @@ export const DEFAULT_FX_SETTINGS: FxSettings = {
     threshold: 0.72,
   },
   motionBlur: {
+    enabled: true,
     intensity: 0.05,
+  },
+  gamepad: {
+    moveSpeedX: 1,
+    moveSpeedY: 1,
+    lookSpeedX: 2.85,
+    lookSpeedY: 2.85,
   },
   atmosphere: {
     fogDensity: 0.002,

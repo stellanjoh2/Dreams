@@ -47,8 +47,22 @@ export interface AudioVolumeSettings {
 
 /** Camera / object motion blur (WebGPU velocity buffer + screen-space samples). */
 export interface MotionBlurSettings {
-  /** Scales motion vectors; 0 disables streaks, ~1 matches three.js example default. */
+  /** When false, velocity MRT and blur samples are skipped (better FPS on low-end GPUs). */
+  enabled: boolean;
+  /** Scales motion vectors when `enabled`; 0 disables streaks, ~1 matches three.js example default. */
   intensity: number;
+}
+
+/** Gamepad analog tuning (mouse look is unchanged — uses `cameraFeel.lookSensitivity`). */
+export interface GamepadSettings {
+  /** Multiplier on left stick strafe (X). 1 = same as keyboard max speed. */
+  moveSpeedX: number;
+  /** Multiplier on left stick forward/back (Y). */
+  moveSpeedY: number;
+  /** Yaw rate at full stick (radians per second). */
+  lookSpeedX: number;
+  /** Pitch rate at full stick (radians per second). */
+  lookSpeedY: number;
 }
 
 export interface FxSettings {
@@ -58,6 +72,7 @@ export interface FxSettings {
   vignette: number;
   bloom: BloomSettings;
   motionBlur: MotionBlurSettings;
+  gamepad: GamepadSettings;
   atmosphere: AtmosphereSettings;
   cameraFeel: CameraFeelSettings;
   fresnel: FresnelSettings;

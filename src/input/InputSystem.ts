@@ -1,9 +1,12 @@
 import * as THREE from 'three';
+import type { GamepadSettings } from '../fx/FxSettings';
 import { GamepadController } from './GamepadController';
 
 export class InputSystem {
   private readonly pressedKeys = new Set<string>();
   private readonly gamepad = new GamepadController();
+  private gamepadMoveX = 1;
+  private gamepadMoveY = 1;
 
   private jumpQueued = false;
   private interactQueued = false;
@@ -24,10 +27,19 @@ export class InputSystem {
     window.addEventListener('keyup', this.handleKeyUp);
   }
 
+  /** Analog move multipliers; look rates are applied in `PlayerController` (rad/s). */
+  setGamepadSettings(settings: GamepadSettings): void {
+    this.gamepadMoveX = settings.moveSpeedX;
+    this.gamepadMoveY = settings.moveSpeedY;
+  }
+
   update(): void {
     const state = this.gamepad.update();
 
-    this.gamepadMove.set(state.moveX, state.moveY);
+    this.gamepadMove.set(state.moveX * this.gamepadMoveX, state.moveY * this.gamepadMoveY);
+    if (this.gamepadMove.lengthSq() > 1) {
+      this.gamepadMove.normalize();
+    }
     this.gamepadLook.set(state.lookX, state.lookY);
     this.running = this.pressedKeys.has('ShiftLeft') || this.pressedKeys.has('ShiftRight') || state.run;
 

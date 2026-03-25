@@ -10,6 +10,10 @@ type SliderConfig = {
     | 'bloom.radius'
     | 'bloom.threshold'
     | 'motionBlur.intensity'
+    | 'gamepad.moveSpeedX'
+    | 'gamepad.moveSpeedY'
+    | 'gamepad.lookSpeedX'
+    | 'gamepad.lookSpeedY'
     | 'atmosphere.fogDensity'
     | 'atmosphere.ambientIntensity'
     | 'atmosphere.hemiIntensity'
@@ -127,6 +131,43 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
     ],
   },
   {
+    title: 'Gamepad',
+    fields: [
+      {
+        key: 'gamepad.moveSpeedX',
+        label: 'Move — horizontal (strafe)',
+        min: 0.35,
+        max: 2.5,
+        step: 0.05,
+        format: (value) => value.toFixed(2),
+      },
+      {
+        key: 'gamepad.moveSpeedY',
+        label: 'Move — vertical (forward/back)',
+        min: 0.35,
+        max: 2.5,
+        step: 0.05,
+        format: (value) => value.toFixed(2),
+      },
+      {
+        key: 'gamepad.lookSpeedX',
+        label: 'Look — horizontal (rad/s)',
+        min: 0.5,
+        max: 9,
+        step: 0.05,
+        format: (value) => value.toFixed(2),
+      },
+      {
+        key: 'gamepad.lookSpeedY',
+        label: 'Look — vertical (rad/s)',
+        min: 0.5,
+        max: 9,
+        step: 0.05,
+        format: (value) => value.toFixed(2),
+      },
+    ],
+  },
+  {
     title: 'Feel',
     fields: [
       { key: 'movement.walkSpeed', label: 'Walk Speed', min: 2, max: 10, step: 0.1 },
@@ -171,6 +212,7 @@ export class FxEditor {
   private readonly panel: HTMLDivElement;
   private readonly inputs = new Map<string, HTMLInputElement>();
   private readonly values = new Map<string, HTMLSpanElement>();
+  private readonly motionBlurEnabledInput: HTMLInputElement;
   private readonly fresnelColorInput: HTMLInputElement;
   private readonly particleColorInput: HTMLInputElement;
   private readonly settings: FxSettings;
@@ -202,6 +244,27 @@ export class FxEditor {
 
     const grid = this.panel.querySelector<HTMLDivElement>('.editor-grid')!;
     const resetButton = this.panel.querySelector<HTMLButtonElement>('.start-button')!;
+
+    const perfSection = document.createElement('section');
+    perfSection.className = 'editor-group';
+    const perfTitle = document.createElement('div');
+    perfTitle.className = 'editor-group-title';
+    perfTitle.textContent = 'Performance';
+    const motionToggle = document.createElement('label');
+    motionToggle.className = 'editor-field';
+    const motionLabel = document.createElement('span');
+    motionLabel.className = 'editor-label';
+    motionLabel.textContent = 'Motion blur (extra GPU pass)';
+    this.motionBlurEnabledInput = document.createElement('input');
+    this.motionBlurEnabledInput.type = 'checkbox';
+    this.motionBlurEnabledInput.checked = this.settings.motionBlur.enabled;
+    this.motionBlurEnabledInput.addEventListener('change', () => {
+      this.settings.motionBlur.enabled = this.motionBlurEnabledInput.checked;
+      this.onChange(this.settings);
+    });
+    motionToggle.append(motionLabel, this.motionBlurEnabledInput);
+    perfSection.append(perfTitle, motionToggle);
+    grid.append(perfSection);
 
     sliderGroups.forEach((group) => {
       const section = document.createElement('section');
@@ -319,6 +382,8 @@ export class FxEditor {
   }
 
   sync(): void {
+    this.motionBlurEnabledInput.checked = this.settings.motionBlur.enabled;
+
     sliderGroups.flatMap((group) => group.fields).forEach((field) => {
       const value = this.getValue(field.key);
       const input = this.inputs.get(field.key);

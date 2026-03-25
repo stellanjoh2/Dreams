@@ -82,8 +82,8 @@ export class PlayerController {
 
     if (look.lengthSq() > 0) {
       cameraSystem.updateLook(
-        look.x * settings.cameraFeel.lookSensitivity * 30 * delta,
-        look.y * settings.cameraFeel.lookSensitivity * 30 * delta,
+        look.x * settings.gamepad.lookSpeedX * delta,
+        look.y * settings.gamepad.lookSpeedY * delta,
       );
     }
 

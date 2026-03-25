@@ -1,11 +1,14 @@
-const DEADZONE = 0.16;
+const DEADZONE = 0.14;
 
-const clampAxis = (value: number): number => {
-  if (Math.abs(value) < DEADZONE) {
+/** Zero inside deadzone; remap remainder to full [-1, 1] so X/Y use the same effective range. */
+const applyDeadzone = (value: number): number => {
+  const a = Math.abs(value);
+  if (a < DEADZONE) {
     return 0;
   }
-
-  return Math.max(-1, Math.min(1, value));
+  const sign = value < 0 ? -1 : 1;
+  const remapped = (a - DEADZONE) / (1 - DEADZONE);
+  return sign * Math.min(1, remapped);
 };
 
 interface ButtonState {
@@ -54,10 +57,10 @@ export class GamepadController {
     }
 
     const [leftX = 0, leftY = 0, rightX = 0, rightY = 0] = gamepad.axes;
-    snapshot.moveX = clampAxis(leftX);
-    snapshot.moveY = clampAxis(-leftY);
-    snapshot.lookX = clampAxis(rightX);
-    snapshot.lookY = clampAxis(rightY);
+    snapshot.moveX = applyDeadzone(leftX);
+    snapshot.moveY = applyDeadzone(-leftY);
+    snapshot.lookX = applyDeadzone(rightX);
+    snapshot.lookY = applyDeadzone(rightY);
     snapshot.run = (gamepad.buttons[6]?.value ?? 0) > 0.2;
 
     snapshot.jump = this.readButton(gamepad, 0);

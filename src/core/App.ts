@@ -158,6 +158,7 @@ export class App {
 
   private applySettings(): void {
     this.cameraSystem?.setSensitivity(this.settings.cameraFeel.lookSensitivity);
+    this.input.setGamepadSettings(this.settings.gamepad);
     this.world?.applyFxSettings(this.settings);
     this.postProcessing?.applySettings(this.settings);
     this.reapplyAudioVolumes();
@@ -179,6 +180,7 @@ export class App {
     Object.assign(this.settings.particles, fresh.particles);
     Object.assign(this.settings.audio, fresh.audio);
     Object.assign(this.settings.motionBlur, fresh.motionBlur);
+    Object.assign(this.settings.gamepad, fresh.gamepad);
     this.applySettings();
   }
 
@@ -288,6 +290,7 @@ export class App {
         particles: { ...fresh.particles, ...parsed.particles },
         audio: { ...fresh.audio, ...(parsed.audio ?? {}) },
         motionBlur: { ...fresh.motionBlur, ...(parsed.motionBlur ?? {}) },
+        gamepad: { ...fresh.gamepad, ...(parsed.gamepad ?? {}) },
       };
       const m = Number(merged.audio.musicVolume);
       const f = Number(merged.audio.fxVolume);
