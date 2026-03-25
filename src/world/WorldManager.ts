@@ -189,6 +189,11 @@ export class WorldManager {
     return this.decorOccupiedSurfaceKeys;
   }
 
+  /** Shared octahedron used by crystal instances — safe for transient pickup dissolve meshes. */
+  getCrystalGeometry(): THREE.BufferGeometry {
+    return this.props.getCrystalGeometry();
+  }
+
   /**
    * Instanced plants (reserves tiles), then spawns cactus enemies on remaining free tiles.
    * Call after `build()` and before butterflies so props don’t overlap.
@@ -1020,6 +1025,7 @@ export class WorldManager {
         instancedMesh,
         instanceIndex,
         basePosition: basePosition.clone(),
+        color,
         collected: false,
         respawnAt: 0,
         rotationY: index * 0.73,

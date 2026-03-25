@@ -22,6 +22,9 @@ const TARGET_BUTTERFLY_EXTENT = 1.575;
 
 const BUTTERFLY_COUNT = 13;
 
+/** Multiplier on the GLB clip (`AnimationMixer.timeScale`; 1 = authored speed in file). */
+const BUTTERFLY_ANIM_PLAYBACK = 2;
+
 /**
  * `WaterSurface` uses `renderOrder` 12 (see `TerrainGenerator`). GLTF wings are often **transparent**;
  * those draw in the transparent pass — lower `renderOrder` runs first, so default 0 lets water paint
@@ -280,7 +283,8 @@ export class ButterflyScatterSystem {
 
             const mixer = startMixer(model, clip ? clip.clone() : null);
             if (mixer) {
-              mixer.timeScale = 0.65 + rnd(index * 503 + 17) * 0.55;
+              mixer.timeScale =
+                BUTTERFLY_ANIM_PLAYBACK * (0.65 + rnd(index * 503 + 17) * 0.55);
             }
 
             this.root.add(pivot);

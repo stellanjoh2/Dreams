@@ -33,18 +33,16 @@ export const AUDIO_ELEVATOR_UP_URLS = [
   publicUrl('audio/sfx/elevator_up.wav'),
 ] as const;
 
-/** Drowning SFX window before `AUDIO_CACTUS_PLAYER_DEATH_URLS` fires (seconds). */
+/** Underwater death: delay before post-death tail / respawn pacing (see `PlayerController`). */
 export const DROWNING_SOUND_PHASE_SECONDS = 2;
 
-/** Looped or trimmed to {@link DROWNING_SOUND_PHASE_SECONDS} when drowning starts, then the cactus death sting plays. */
-export const AUDIO_PLAYER_DROWNING_URLS = [
-  publicUrl('audio/sfx/player_drowning.wav'),
-  publicUrl('audio/sfx/drowning.wav'),
-  publicUrl('audio/sfx/drowning_death.wav'),
-  publicUrl('audio/sfx/underwater_death.wav'),
+/** One-shot when the player collects a crystal (`#` in filename → `%23` in URL). */
+export const AUDIO_CRYSTAL_PICKUP_URLS = [
+  publicUrl('audio/sfx/magical_crystals_pic_%232-1774468619428.wav'),
+  publicUrl('audio/sfx/crystal_pickup.wav'),
 ] as const;
 
-/** Plays once **2s** after drowning starts (after the drowning phase). */
+/** One-shot when the player drowns (underwater death). */
 export const AUDIO_CACTUS_PLAYER_DEATH_URLS = [
   publicUrl('audio/sfx/cactus_player_death__%233-1774251334913.wav'),
   publicUrl('audio/sfx/cactus_player_death.wav'),

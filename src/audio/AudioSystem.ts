@@ -2,13 +2,12 @@ import * as THREE from 'three';
 import {
   AUDIO_CACTUS_ENEMY_PROXIMITY_URLS,
   AUDIO_CACTUS_PLAYER_DEATH_URLS,
+  AUDIO_CRYSTAL_PICKUP_URLS,
   AUDIO_ELEVATOR_DOWN_URLS,
   AUDIO_ELEVATOR_UP_URLS,
   AUDIO_JUMP_PAD_URLS,
   AUDIO_JUMP_URLS,
   AUDIO_MUSIC_URLS,
-  AUDIO_PLAYER_DROWNING_URLS,
-  DROWNING_SOUND_PHASE_SECONDS,
 } from '../config/audioAssets';
 import { DEFAULT_FX_SETTINGS } from '../config/defaults';
 import type { AudioVolumeSettings } from '../fx/FxSettings';
@@ -26,8 +25,8 @@ const ELEVATOR_UP_GAIN = 0.42;
 const ELEVATOR_DOWN_GAIN = 0.38;
 /** Bus gain for cactus line (stereo SFX bus — not spatial). */
 const CACTUS_ENEMY_PROXIMITY_GAIN = Math.min(1, SFX_GAIN * 2.1);
-const PLAYER_DROWNING_GAIN = Math.min(1, SFX_GAIN * 1.35);
 const CACTUS_PLAYER_DEATH_GAIN = Math.min(1, SFX_GAIN * 1.9);
+const CRYSTAL_PICKUP_GAIN = Math.min(1, SFX_GAIN * 0.95);
 
 /** Set `true` to restore elevator up/down SFX (samples or procedural). */
 const ELEVATOR_SFX_ENABLED = false;
@@ -69,8 +68,8 @@ export class AudioSystem {
   private elevatorUpBuffer: AudioBuffer | null = null;
   private elevatorDownBuffer: AudioBuffer | null = null;
   private cactusEnemyProximityBuffer: AudioBuffer | null = null;
-  private playerDrowningBuffer: AudioBuffer | null = null;
   private cactusPlayerDeathBuffer: AudioBuffer | null = null;
+  private crystalPickupBuffer: AudioBuffer | null = null;
   /** Blocks overlapping cactus aggro lines; drives idle animation “threatened” speed in world. */
   private cactusAggroVoicePlaying = false;
   private musicStarted = false;
@@ -123,13 +122,24 @@ export class AudioSystem {
       return;
     }
 
-    const [jump, jumpPad, music, elevatorUp, elevatorDown, cactusProximity] = await Promise.all([
+    const [
+      jump,
+      jumpPad,
+      music,
+      elevatorUp,
+      elevatorDown,
+      cactusProximity,
+      cactusPlayerDeath,
+      crystalPickup,
+    ] = await Promise.all([
       fetchFirstDecodableUrl(ctx, AUDIO_JUMP_URLS),
       fetchFirstDecodableUrl(ctx, AUDIO_JUMP_PAD_URLS),
       fetchFirstDecodableUrl(ctx, AUDIO_MUSIC_URLS),
       fetchFirstDecodableUrl(ctx, AUDIO_ELEVATOR_UP_URLS),
       fetchFirstDecodableUrl(ctx, AUDIO_ELEVATOR_DOWN_URLS),
       fetchFirstDecodableUrl(ctx, AUDIO_CACTUS_ENEMY_PROXIMITY_URLS),
+      fetchFirstDecodableUrl(ctx, AUDIO_CACTUS_PLAYER_DEATH_URLS),
+      fetchFirstDecodableUrl(ctx, AUDIO_CRYSTAL_PICKUP_URLS),
     ]);
 
     this.jumpBuffer = jump;
@@ -138,6 +148,8 @@ export class AudioSystem {
     this.elevatorUpBuffer = elevatorUp;
     this.elevatorDownBuffer = elevatorDown;
     this.cactusEnemyProximityBuffer = cactusProximity;
+    this.cactusPlayerDeathBuffer = cactusPlayerDeath;
+    this.crystalPickupBuffer = crystalPickup;
 
     this.ensureSfxBus();
     this.startBackgroundMusicIfNeeded();
@@ -572,10 +584,7 @@ export class AudioSystem {
     return this.cactusAggroVoicePlaying;
   }
 
-  /**
-   * Underwater death: drowning SFX for {@link DROWNING_SOUND_PHASE_SECONDS}s (loops if shorter, trims if longer),
-   * then one-shot cactus player death sting.
-   */
+  /** Underwater death: one-shot sting only (no separate drowning loop). */
   playDrowningDeathSequence(): void {
     void (async (): Promise<void> => {
       await this.unlock();
@@ -592,48 +601,23 @@ export class AudioSystem {
         return;
       }
 
-      if (!this.playerDrowningBuffer) {
-        this.playerDrowningBuffer = await fetchFirstDecodableUrl(ctx, AUDIO_PLAYER_DROWNING_URLS);
-      }
       if (!this.cactusPlayerDeathBuffer) {
         this.cactusPlayerDeathBuffer = await fetchFirstDecodableUrl(ctx, AUDIO_CACTUS_PLAYER_DEATH_URLS);
       }
 
       this.ensureSfxBus();
-      const phase = DROWNING_SOUND_PHASE_SECONDS;
       const t0 = ctx.currentTime;
-      const tDeath = t0 + phase;
-
-      if (this.playerDrowningBuffer) {
-        const buf = this.playerDrowningBuffer;
-        const bus = ctx.createGain();
-        bus.gain.setValueAtTime(PLAYER_DROWNING_GAIN, t0);
-        bus.connect(this.getSfxOutput());
-        const src = ctx.createBufferSource();
-        src.buffer = buf;
-        src.loop = buf.duration < phase - 0.02;
-        src.connect(bus);
-        try {
-          src.start(t0);
-          src.stop(tDeath);
-        } catch {
-          bus.disconnect();
-        }
-        src.onended = (): void => {
-          bus.disconnect();
-        };
-      }
 
       if (this.cactusPlayerDeathBuffer) {
         const buf = this.cactusPlayerDeathBuffer;
         const bus = ctx.createGain();
-        bus.gain.setValueAtTime(CACTUS_PLAYER_DEATH_GAIN, tDeath);
+        bus.gain.setValueAtTime(CACTUS_PLAYER_DEATH_GAIN, t0);
         bus.connect(this.getSfxOutput());
         const src = ctx.createBufferSource();
         src.buffer = buf;
         src.connect(bus);
         try {
-          src.start(tDeath);
+          src.start(t0);
         } catch {
           bus.disconnect();
         }
@@ -900,6 +884,54 @@ export class AudioSystem {
   }
 
   playCrystalPickup(): void {
+    const ctx = this.context;
+    if (!ctx || ctx.state !== 'running') {
+      return;
+    }
+
+    if (!this.crystalPickupBuffer) {
+      if (this.unlockPromise) {
+        void this.unlockPromise.then(() => {
+          if (this.context?.state !== 'running') {
+            return;
+          }
+          if (this.crystalPickupBuffer) {
+            this.playCrystalPickupNow();
+          } else {
+            this.playProceduralCrystalPickup();
+          }
+        });
+      }
+      return;
+    }
+
+    this.playCrystalPickupNow();
+  }
+
+  private playCrystalPickupNow(): void {
+    const ctx = this.context;
+    if (!ctx || ctx.state !== 'running' || !this.crystalPickupBuffer) {
+      return;
+    }
+
+    this.ensureSfxBus();
+
+    const t = ctx.currentTime;
+    const bus = ctx.createGain();
+    bus.gain.setValueAtTime(CRYSTAL_PICKUP_GAIN, t);
+    bus.connect(this.getSfxOutput());
+
+    const source = ctx.createBufferSource();
+    source.buffer = this.crystalPickupBuffer;
+    source.connect(bus);
+    source.start(t);
+    source.onended = (): void => {
+      bus.disconnect();
+    };
+  }
+
+  /** Arpeggio fallback when no crystal pickup sample decodes. */
+  private playProceduralCrystalPickup(): void {
     if (!this.context || this.context.state !== 'running') {
       return;
     }

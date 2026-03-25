@@ -4,8 +4,10 @@ import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { motionBlur } from 'three/addons/tsl/display/MotionBlur.js';
 import {
+  add,
   float,
   mix,
+  mul,
   mrt,
   normalView,
   output,
@@ -15,6 +17,7 @@ import {
   uniform,
   uv,
   vec2,
+  vec3,
   vec4,
   velocity,
 } from 'three/tsl';
@@ -35,6 +38,7 @@ export class PostProcessingPipeline {
   private readonly saturationNode;
   private readonly vignetteNode;
   private readonly motionBlurIntensityNode;
+  private readonly crystalPickupPulseNode;
 
   private motionBlurEnabled: boolean;
 
@@ -51,6 +55,7 @@ export class PostProcessingPipeline {
     this.saturationNode = uniform(settings.saturation);
     this.vignetteNode = uniform(settings.vignette);
     this.motionBlurIntensityNode = uniform(settings.motionBlur.intensity);
+    this.crystalPickupPulseNode = uniform(0);
     this.motionBlurEnabled = settings.motionBlur.enabled;
 
     this.rebuildPipeline(settings);
@@ -115,9 +120,14 @@ export class PostProcessingPipeline {
     const postBloomColor = aoLitRgb.add((this.bloomNode as typeof scenePassColor).rgb);
     const contrastedColor = postBloomColor.sub(0.5).mul(this.contrastNode).add(0.5);
     const saturatedColor = saturation(contrastedColor, this.saturationNode);
+    const pulseN = this.crystalPickupPulseNode as unknown as Parameters<typeof mul>[0];
+    const pickBoost = mul(vec3(0.26, 0.92, 1.0), mul(pulseN, float(1.12)));
+    const brightLift = add(float(1), mul(pulseN, float(0.16)));
+    const chromaKick = add(float(1), mul(pulseN, float(0.1)));
+    const saturatedBoosted = mul(saturatedColor.add(pickBoost).mul(chromaKick), brightLift);
     const vignetteUv = uv().sub(vec2(0.5, 0.5)).mul(1.8);
     const vignetteMask = smoothstep(0.14, 1.05, vignetteUv.dot(vignetteUv)).mul(this.vignetteNode);
-    const finalColor = mix(saturatedColor, saturatedColor.mul(0.68), vignetteMask);
+    const finalColor = mix(saturatedBoosted, saturatedBoosted.mul(0.68), vignetteMask);
 
     this.renderPipeline = new RenderPipeline(this.renderer, vec4(finalColor, 1));
     this.motionBlurEnabled = settings.motionBlur.enabled;
@@ -145,6 +155,11 @@ export class PostProcessingPipeline {
     this.vignetteNode.value = settings.vignette;
     this.motionBlurIntensityNode.value = settings.motionBlur.intensity;
     this.renderPipeline.needsUpdate = true;
+  }
+
+  /** 0–1 pickup “boost” tint (decay on CPU each frame). */
+  setCrystalPickupPulse(strength: number): void {
+    this.crystalPickupPulseNode.value = THREE.MathUtils.clamp(strength, 0, 1);
   }
 
   render(): void {

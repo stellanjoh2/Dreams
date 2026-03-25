@@ -79,6 +79,7 @@ export class App {
     await this.world.loadButterflies();
     this.player.respawn(this.world.getRespawnPoint(new THREE.Vector3()));
     this.crystalSystem.setCrystals(crystals);
+    this.crystalSystem.attachVfxResources(this.world.scene, this.world.getCrystalGeometry());
 
     this.interactionSystem = new InteractionSystem(this.crystalSystem, this.ui, this.audio);
     if (USE_POST_PROCESSING) {
@@ -241,6 +242,7 @@ export class App {
     this.world.update(delta, elapsed, this.cameraSystem.camera, this.player.position);
     this.crystalSystem.update(delta);
     this.interactionSystem?.update(this.cameraSystem.getPosition(this.cameraPosition), this.input);
+    this.postProcessing?.setCrystalPickupPulse(this.crystalSystem.getScreenPickupPulse());
     this.ui.setUnderwaterDepth(this.player.getWaterSubmersionDepth());
     const { width, height, changed } = this.rendererCore.syncSize();
     if (changed) {

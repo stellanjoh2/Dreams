@@ -1,11 +1,14 @@
 import * as THREE from 'three';
 import type { LensFlareEmissiveCandidate } from '../fx/LensFlareOverlay';
+import { CrystalPickupVfxHost } from '../fx/CrystalPickupVfx';
 
 export interface CrystalInstance {
   id: string;
   instancedMesh: THREE.InstancedMesh;
   instanceIndex: number;
   basePosition: THREE.Vector3;
+  /** Hex tint — matches anchor; used for pickup dissolve / sparks. */
+  color: string;
   collected: boolean;
   respawnAt: number;
   rotationY: number;
@@ -16,16 +19,55 @@ export class CrystalSystem {
   private readonly flareWorld = new THREE.Vector3();
   private readonly crystalDummy = new THREE.Object3D();
   private readonly nearestScratch = new THREE.Vector3();
+  private readonly motionMatrixScratch = new THREE.Matrix4();
   private readonly zeroScaleMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
   private elapsed = 0;
+  private vfx: CrystalPickupVfxHost | null = null;
+  private crystalGeometry: THREE.BufferGeometry | null = null;
+  private screenPickupPulse = 0;
 
   setCrystals(crystals: CrystalInstance[]): void {
     this.crystals.length = 0;
     this.crystals.push(...crystals);
   }
 
+  /** Scene + shared crystal geometry for pickup dissolve (call once after world build). */
+  attachVfxResources(scene: THREE.Scene, crystalGeometry: THREE.BufferGeometry): void {
+    this.vfx?.dispose();
+    this.vfx = new CrystalPickupVfxHost(scene);
+    this.crystalGeometry = crystalGeometry;
+  }
+
+  /** Decaying 0–1 strength for post-process pickup tint. */
+  getScreenPickupPulse(): number {
+    return this.screenPickupPulse;
+  }
+
+  private writeActiveCrystalMatrix(crystal: CrystalInstance, target: THREE.Matrix4): void {
+    const bobWave = Math.sin(this.elapsed * 1.8 + crystal.basePosition.x * 0.15);
+    const bob = 0.16 + (bobWave * 0.5 + 0.5) * 0.12;
+
+    this.crystalDummy.position.set(crystal.basePosition.x, crystal.basePosition.y + bob, crystal.basePosition.z);
+    this.crystalDummy.rotation.set(
+      0,
+      crystal.rotationY,
+      Math.sin(this.elapsed * 2.2 + crystal.basePosition.z * 0.1) * 0.04,
+    );
+    this.crystalDummy.scale.set(0.58, 0.92, 0.58);
+    this.crystalDummy.updateMatrix();
+    target.copy(this.crystalDummy.matrix);
+  }
+
   update(delta: number): void {
     this.elapsed += delta;
+
+    if (this.screenPickupPulse > 0.001) {
+      this.screenPickupPulse *= Math.exp(-delta * 4.0);
+    } else {
+      this.screenPickupPulse = 0;
+    }
+
+    this.vfx?.update(delta);
 
     const touchedMeshes = new Set<THREE.InstancedMesh>();
 
@@ -108,6 +150,13 @@ export class CrystalSystem {
   }
 
   collect(crystal: CrystalInstance): void {
+    if (this.vfx && this.crystalGeometry) {
+      this.writeActiveCrystalMatrix(crystal, this.motionMatrixScratch);
+      this.vfx.spawn(this.motionMatrixScratch, crystal.color, this.crystalGeometry);
+    }
+
+    this.screenPickupPulse = 1;
+
     crystal.collected = true;
     crystal.respawnAt = Number.POSITIVE_INFINITY;
     crystal.instancedMesh.setMatrixAt(crystal.instanceIndex, this.zeroScaleMatrix);
