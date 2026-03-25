@@ -61,7 +61,7 @@ export class TerrainGenerator {
     this.waterGeometry = new THREE.CircleGeometry(rWater, 192);
   }
 
-  createGround(): THREE.Group {
+  createGround(waterHighFrequencyNormal?: THREE.Texture): THREE.Group {
     const group = new THREE.Group();
     this.elevatorMeshes.clear();
 
@@ -81,15 +81,32 @@ export class TerrainGenerator {
     seaBed.receiveShadow = true;
     group.add(seaBed);
 
-    const water = new WaterSurfaceMesh(this.waterGeometry, {
-      color: '#4fd6da',
-      flowDirection: new THREE.Vector2(0.35, 0.18),
-      flowSpeed: 0.042,
-      reflectivity: 0.22,
-      scale: 5.6,
-      normalMap0: this.waterNormal0,
-      normalMap1: this.waterNormal1,
-    });
+    const waterOptions =
+      waterHighFrequencyNormal !== undefined
+        ? {
+            color: '#4fd6da',
+            flowDirection: new THREE.Vector2(0.35, 0.18),
+            flowSpeed: 0.052,
+            reflectivity: 0.28,
+            scale: 26,
+            normalDistort: 0.024,
+            normalStrength: 0.92,
+            standardNormalUnpack: true as const,
+            normalMap0: waterHighFrequencyNormal,
+            normalMap1: waterHighFrequencyNormal,
+          }
+        : {
+            color: '#4fd6da',
+            flowDirection: new THREE.Vector2(0.35, 0.18),
+            flowSpeed: 0.042,
+            reflectivity: 0.22,
+            scale: 5.6,
+            standardNormalUnpack: false as const,
+            normalMap0: this.waterNormal0,
+            normalMap1: this.waterNormal1,
+          };
+
+    const water = new WaterSurfaceMesh(this.waterGeometry, waterOptions);
     water.name = 'WaterSurface';
     water.frustumCulled = false;
     water.renderOrder = 12;

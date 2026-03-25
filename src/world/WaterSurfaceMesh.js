@@ -55,6 +55,9 @@ class WaterSurfaceNode extends TempNode {
     this.flowSpeed = uniform(options.flowSpeed !== undefined ? options.flowSpeed : 0.03);
     this.reflectivity = uniform(options.reflectivity !== undefined ? options.reflectivity : 0.02);
     this.scale = uniform(options.scale !== undefined ? options.scale : 1);
+    this.normalStrength = uniform(
+      options.normalStrength !== undefined ? options.normalStrength : 1,
+    );
     this.flowConfig = uniform(new Vector3());
 
     this.updateBeforeType = NodeUpdateType.RENDER;
@@ -63,6 +66,9 @@ class WaterSurfaceNode extends TempNode {
     this._halfCycle = this._cycle * 0.5;
 
     this._USE_FLOW = options.flowMap !== undefined;
+    /** Procedural normals used a custom RGB packing; tiling PNGs are standard tangent-space. */
+    this._STANDARD_NORMAL_UNPACK = options.standardNormalUnpack === true;
+    this._normalDistort = options.normalDistort !== undefined ? options.normalDistort : 0.034;
   }
 
   updateFlow(delta) {
@@ -122,15 +128,33 @@ class WaterSurfaceNode extends TempNode {
       const flowLerp = abs(halfCycle.sub(flowMapOffset0)).div(halfCycle);
       const normalColor = mix(normalColor0, normalColor1, flowLerp);
 
-      const normal = normalize(vec3(normalColor.r.mul(2).sub(1), normalColor.b, normalColor.g.mul(2).sub(1)));
+      const flatUp = vec3(0, 0, 1);
+      let normal;
+
+      if (this._STANDARD_NORMAL_UNPACK === true) {
+        const nSample = normalize(
+          vec3(
+            normalColor.r.mul(2).sub(1),
+            normalColor.g.mul(2).sub(1),
+            normalColor.b.mul(2).sub(1),
+          ),
+        );
+        normal = normalize(mix(flatUp, nSample, this.normalStrength));
+      } else {
+        normal = normalize(
+          vec3(normalColor.r.mul(2).sub(1), normalColor.b, normalColor.g.mul(2).sub(1)),
+        );
+      }
 
       const theta = max(dot(toEye, normal), 0);
       const reflectance = pow(float(1.0).sub(theta), 5.0)
         .mul(float(1.0).sub(this.reflectivity))
         .add(this.reflectivity);
 
-      // Slightly gentler UV warp — large offsets + viewportSharedTexture exaggerate shimmer/popping at edges.
-      const offset = normal.xz.mul(0.034).toVar();
+      const distort = float(this._normalDistort);
+      const offset = (
+        this._STANDARD_NORMAL_UNPACK === true ? normal.xy.mul(distort) : normal.xz.mul(distort)
+      ).toVar();
 
       reflectionSampler.uvNode = reflectorUvBase.add(offset);
 

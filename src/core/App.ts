@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import WebGPU from 'three/addons/capabilities/WebGPU.js';
 import { DEFAULT_FX_SETTINGS, ENABLE_EMISSIVE_LENS_FLARE } from '../config/defaults';
+import { loadDataTexture } from '../config/loadTexture';
+import { publicUrl } from '../config/publicUrl';
 import { FirstPersonCamera } from '../camera/FirstPersonCamera';
 import { RendererCore } from './RendererCore';
 import { WorldManager } from '../world/WorldManager';
@@ -73,7 +75,15 @@ export class App {
       playCactusEnemyProximity: (x, y, z) => this.audio.playCactusEnemyProximity(x, y, z),
       isCactusEnemyProximityVoiceActive: () => this.audio.isCactusAggroVoicePlaying(),
     });
-    const crystals = this.world.build(this.settings);
+
+    let waterHfNormal: THREE.Texture | undefined;
+    try {
+      waterHfNormal = await loadDataTexture(publicUrl('textures/water_hf_normal.png'));
+    } catch {
+      console.warn('[App] Could not load textures/water_hf_normal.png — procedural water normals');
+    }
+
+    const crystals = this.world.build(this.settings, waterHfNormal);
     await this.world.loadCloudPack();
     await this.world.loadDecorScatter();
     await this.world.loadButterflies();

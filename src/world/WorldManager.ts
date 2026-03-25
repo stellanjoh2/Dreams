@@ -155,7 +155,7 @@ export class WorldManager {
     }
   }
 
-  build(settings: FxSettings): CrystalInstance[] {
+  build(settings: FxSettings, waterHighFrequencyNormal?: THREE.Texture): CrystalInstance[] {
     this.scene.background = new THREE.Color('#8fb7ff');
     this.scene.fog = new THREE.FogExp2(
       new THREE.Color(settings.atmosphere.skyColor),
@@ -169,7 +169,7 @@ export class WorldManager {
     this.buildSun();
     this.distantBackdrop = createDistantWorldBackdrop();
     this.worldRoot.add(this.distantBackdrop);
-    this.worldRoot.add(this.terrain.createGround());
+    this.worldRoot.add(this.terrain.createGround(waterHighFrequencyNormal));
     this.fishSchools.load();
     this.fishingBoatRight.load();
     this.fishingBoatLeft.load();

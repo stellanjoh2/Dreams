@@ -6,6 +6,12 @@ export type WaterSurfaceMeshOptions = {
   flowSpeed?: number;
   reflectivity?: number;
   scale?: number;
+  /** UV distortion from normals (default 0.034). */
+  normalDistort?: number;
+  /** Blend toward flat normal; 1 = full map (default 1). */
+  normalStrength?: number;
+  /** Tiling tangent-space PNG normal maps (RGB); procedural water uses false. */
+  standardNormalUnpack?: boolean;
   flowMap?: Texture | null;
   normalMap0: Texture;
   normalMap1: Texture;

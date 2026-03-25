@@ -889,23 +889,34 @@ export class AudioSystem {
       return;
     }
 
-    if (!this.crystalPickupBuffer) {
-      if (this.unlockPromise) {
-        void this.unlockPromise.then(() => {
-          if (this.context?.state !== 'running') {
-            return;
-          }
-          if (this.crystalPickupBuffer) {
-            this.playCrystalPickupNow();
-          } else {
-            this.playProceduralCrystalPickup();
-          }
-        });
-      }
+    if (this.crystalPickupBuffer) {
+      this.playCrystalPickupNow();
       return;
     }
 
-    this.playCrystalPickupNow();
+    void this.loadCrystalPickupBufferAndPlay();
+  }
+
+  /** Decode sample if bootstrap missed it (race / failed URL); then play or procedural fallback. */
+  private async loadCrystalPickupBufferAndPlay(): Promise<void> {
+    if (this.unlockPromise) {
+      await this.unlockPromise;
+    }
+
+    const ctx = this.context;
+    if (!ctx || ctx.state !== 'running') {
+      return;
+    }
+
+    if (!this.crystalPickupBuffer) {
+      this.crystalPickupBuffer = await fetchFirstDecodableUrl(ctx, AUDIO_CRYSTAL_PICKUP_URLS);
+    }
+
+    if (this.crystalPickupBuffer) {
+      this.playCrystalPickupNow();
+    } else {
+      this.playProceduralCrystalPickup();
+    }
   }
 
   private playCrystalPickupNow(): void {

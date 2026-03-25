@@ -36,8 +36,12 @@ export const AUDIO_ELEVATOR_UP_URLS = [
 /** Underwater death: delay before post-death tail / respawn pacing (see `PlayerController`). */
 export const DROWNING_SOUND_PHASE_SECONDS = 2;
 
-/** One-shot when the player collects a crystal (`#` in filename → `%23` in URL). */
+/**
+ * One-shot when the player collects a crystal.
+ * Prefer ASCII filename first — `#` in paths breaks some hosts and `fetch()` URL fragments.
+ */
 export const AUDIO_CRYSTAL_PICKUP_URLS = [
+  publicUrl('audio/sfx/magical_crystals_pickup.wav'),
   publicUrl('audio/sfx/magical_crystals_pic_%232-1774468619428.wav'),
   publicUrl('audio/sfx/crystal_pickup.wav'),
 ] as const;
