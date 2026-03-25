@@ -23,6 +23,9 @@ export const DEFAULT_FX_SETTINGS: FxSettings = {
     radius: 0.5,
     threshold: 0.72,
   },
+  motionBlur: {
+    intensity: 0.05,
+  },
   atmosphere: {
     fogDensity: 0.002,
     skyColor: '#d5c4ff',

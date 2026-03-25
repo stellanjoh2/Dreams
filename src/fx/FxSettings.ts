@@ -45,12 +45,19 @@ export interface AudioVolumeSettings {
   fxVolume: number;
 }
 
+/** Camera / object motion blur (WebGPU velocity buffer + screen-space samples). */
+export interface MotionBlurSettings {
+  /** Scales motion vectors; 0 disables streaks, ~1 matches three.js example default. */
+  intensity: number;
+}
+
 export interface FxSettings {
   exposure: number;
   contrast: number;
   saturation: number;
   vignette: number;
   bloom: BloomSettings;
+  motionBlur: MotionBlurSettings;
   atmosphere: AtmosphereSettings;
   cameraFeel: CameraFeelSettings;
   fresnel: FresnelSettings;

@@ -178,6 +178,7 @@ export class App {
     Object.assign(this.settings.movement, fresh.movement);
     Object.assign(this.settings.particles, fresh.particles);
     Object.assign(this.settings.audio, fresh.audio);
+    Object.assign(this.settings.motionBlur, fresh.motionBlur);
     this.applySettings();
   }
 
@@ -286,6 +287,7 @@ export class App {
         movement: { ...fresh.movement, ...parsed.movement },
         particles: { ...fresh.particles, ...parsed.particles },
         audio: { ...fresh.audio, ...(parsed.audio ?? {}) },
+        motionBlur: { ...fresh.motionBlur, ...(parsed.motionBlur ?? {}) },
       };
       const m = Number(merged.audio.musicVolume);
       const f = Number(merged.audio.fxVolume);

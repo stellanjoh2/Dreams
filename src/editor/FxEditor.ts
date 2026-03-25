@@ -9,6 +9,7 @@ type SliderConfig = {
     | 'bloom.strength'
     | 'bloom.radius'
     | 'bloom.threshold'
+    | 'motionBlur.intensity'
     | 'atmosphere.fogDensity'
     | 'atmosphere.ambientIntensity'
     | 'atmosphere.hemiIntensity'
@@ -66,6 +67,14 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
       { key: 'bloom.strength', label: 'Bloom Strength', min: 0, max: 2.8, step: 0.01 },
       { key: 'bloom.radius', label: 'Bloom Radius', min: 0, max: 1, step: 0.01 },
       { key: 'bloom.threshold', label: 'Bloom Threshold', min: 0, max: 1.2, step: 0.01 },
+      {
+        key: 'motionBlur.intensity',
+        label: 'Motion Blur',
+        min: 0,
+        max: 2.5,
+        step: 0.05,
+        format: (value) => value.toFixed(2),
+      },
     ],
   },
   {

@@ -2,7 +2,22 @@ import * as THREE from 'three';
 import { RenderPipeline, WebGPURenderer } from 'three/webgpu';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { float, mix, mrt, normalView, output, pass, saturation, smoothstep, uniform, uv, vec2, vec4 } from 'three/tsl';
+import { motionBlur } from 'three/addons/tsl/display/MotionBlur.js';
+import {
+  float,
+  mix,
+  mrt,
+  normalView,
+  output,
+  pass,
+  saturation,
+  smoothstep,
+  uniform,
+  uv,
+  vec2,
+  vec4,
+  velocity,
+} from 'three/tsl';
 import type { FxSettings } from './FxSettings';
 
 export class PostProcessingPipeline {
@@ -15,6 +30,7 @@ export class PostProcessingPipeline {
   private readonly contrastNode;
   private readonly saturationNode;
   private readonly vignetteNode;
+  private readonly motionBlurIntensityNode;
 
   constructor(
     renderer: WebGPURenderer,
@@ -26,12 +42,14 @@ export class PostProcessingPipeline {
     this.contrastNode = uniform(settings.contrast);
     this.saturationNode = uniform(settings.saturation);
     this.vignetteNode = uniform(settings.vignette);
+    this.motionBlurIntensityNode = uniform(settings.motionBlur.intensity);
 
     this.scenePass = pass(scene, camera);
     this.scenePass.setMRT(
       mrt({
         output,
         normal: normalView,
+        velocity,
       }),
     );
     const scenePassColor = this.scenePass.getTextureNode('output');
@@ -58,8 +76,12 @@ export class PostProcessingPipeline {
     const aoFarBlend = smoothstep(float(0.18), float(0.62), linearDepth);
     const aoSample = this.aoNode.getTextureNode().r.clamp(0.68, 1);
     const aoFactor = mix(aoSample, float(1), aoFarBlend);
-    const aoLitColor = scenePassColor.rgb.mul(aoFactor);
-    const postBloomColor = aoLitColor.add(this.bloomNode).rgb;
+    const sceneVelocity = this.scenePass.getTextureNode('velocity').mul(this.motionBlurIntensityNode);
+    /** Velocity MRT + multi-tap sampling; see three.js `webgpu_postprocessing_motion_blur`. */
+    /** `motionBlur` is vec4 at runtime; cast aligns TSL typings with `scenePassColor` texture helpers. */
+    const motionBlurred = motionBlur(scenePassColor, sceneVelocity) as typeof scenePassColor;
+    const aoLitRgb = motionBlurred.rgb.mul(aoFactor);
+    const postBloomColor = aoLitRgb.add((this.bloomNode as typeof scenePassColor).rgb);
     const contrastedColor = postBloomColor.sub(0.5).mul(this.contrastNode).add(0.5);
     /**
      * Do **not** pre-compress “hot” pixels here: a luminance rolloff before saturation was dimming normal
@@ -88,6 +110,7 @@ export class PostProcessingPipeline {
     this.contrastNode.value = settings.contrast;
     this.saturationNode.value = settings.saturation;
     this.vignetteNode.value = settings.vignette;
+    this.motionBlurIntensityNode.value = settings.motionBlur.intensity;
     this.renderPipeline.needsUpdate = true;
   }
 
