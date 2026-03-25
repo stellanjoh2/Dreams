@@ -52,9 +52,10 @@ const GROUND_LEVITATE_MAX_BLOCKS = 12;
 /**
  * Vertical band (block units above `WORLD_FLOOR_Y`) for sky clusters over the play hole.
  * Clears typical platform stacks; reads as “above the game world”.
+ * (+5 vs original band — lift ceiling/sky candy higher above the playfield.)
  */
-const SKY_LIFT_MIN_BLOCKS = 14;
-const SKY_LIFT_MAX_BLOCKS = 40;
+const SKY_LIFT_MIN_BLOCKS = 19;
+const SKY_LIFT_MAX_BLOCKS = 45;
 
 /** Aerial props: keep silhouettes broad / low (no skyline over the map). */
 const SKY_MAX_HEIGHT_BLOCKS = 2.15;

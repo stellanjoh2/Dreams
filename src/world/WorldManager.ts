@@ -13,6 +13,8 @@ import {
 import { MountainBackdropProp } from './MountainBackdropProp';
 import { DistantPlanetsBackdrop } from './DistantPlanetsBackdrop';
 import { ButterflyScatterSystem } from './ButterflyScatterSystem';
+import { WaterEdgeGrassScatter } from './WaterEdgeGrassScatter';
+import { OrbitingUfoProp } from './OrbitingUfoProp';
 import { CactusEnemySystem } from './CactusEnemySystem';
 import {
   createDistantWorldBackdrop,
@@ -106,6 +108,8 @@ export class WorldManager {
   private readonly cactusEnemies: CactusEnemySystem;
   private readonly plantLoader = new GLTFLoader();
   private readonly butterflyScatter: ButterflyScatterSystem;
+  private readonly waterEdgeGrass: WaterEdgeGrassScatter;
+  private readonly orbitingUfo: OrbitingUfoProp;
   private distantBackdrop: THREE.Group | null = null;
   private orbitalClouds: OrbitalCloud[] = [];
   private cloudRingGroup?: THREE.Group;
@@ -145,6 +149,8 @@ export class WorldManager {
       audioHooks?.isCactusEnemyProximityVoiceActive,
     );
     this.butterflyScatter = new ButterflyScatterSystem(this.worldRoot, this.plantLoader);
+    this.waterEdgeGrass = new WaterEdgeGrassScatter(this.worldRoot, this.plantLoader);
+    this.orbitingUfo = new OrbitingUfoProp(this.worldRoot, this.plantLoader);
     this.scene.add(this.worldRoot);
 
     for (const anchor of RESPAWN_ANCHORS) {
@@ -175,6 +181,7 @@ export class WorldManager {
     this.fishingBoatLeft.load();
     this.mountainBackdrop.load();
     this.distantPlanets.load();
+    this.orbitingUfo.load();
     this.seedDecorOccupancyFromWorldProps();
     this.worldRoot.add(this.plantScatterRoot);
     this.buildLandmarks();
@@ -235,6 +242,7 @@ export class WorldManager {
 
     this.ambientDust.update(elapsed, camera);
     this.fishSchools.update(delta, elapsed);
+    this.orbitingUfo.update(delta, elapsed);
     this.butterflyScatter.update(delta, elapsed);
     this.fishingBoatRight.update(delta, elapsed);
     this.fishingBoatLeft.update(delta, elapsed);
@@ -546,6 +554,11 @@ export class WorldManager {
     } catch (err) {
       console.warn('[WorldManager] Could not load stylized cloud pack:', err);
     }
+  }
+
+  /** Stylized grass in the water ring around platform cubes (`stylized_grass_8/stylized_grass.glb`). */
+  async loadWaterEdgeGrass(): Promise<void> {
+    await this.waterEdgeGrass.load();
   }
 
   /** `public/assets/butterflies.glb` — scattered over platform tops (see `ButterflyScatterSystem`). */

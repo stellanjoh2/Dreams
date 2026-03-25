@@ -9,6 +9,31 @@ import { getSeaBedRadiusWorld, getWaterSurfaceRadiusWorld } from './worldHorizon
 const TILE_RENDER_SCALE = BLOCK_UNIT * 1.02;
 const metallicFlakeDetail = createMetallicFlakeOrmTexture(6);
 
+/** Filled disk with inner/outer radial + angular subdivisions — enough verts for soft mesh waves. */
+const WATER_DISK_THETA = 112;
+const WATER_DISK_PHI = 52;
+/** Avoid a visible hole at origin; ~1 mm in world units. */
+const WATER_DISK_INNER_EPS = 0.001;
+
+/** Ambient swell (local Z before mesh rotation → world vertical). */
+const WATER_SWELL_AMP = 0.18;
+const WATER_SWELL_AMP2 = 0.104;
+const WATER_SWELL_AMP3 = 0.068;
+
+function waterSwellHeight(localX: number, localY: number, t: number): number {
+  const wx = localX;
+  const wz = localY;
+  return (
+    WATER_SWELL_AMP *
+      Math.sin(wx * 0.062 + t * 0.52) *
+      Math.cos(wz * 0.055 - t * 0.45) +
+    WATER_SWELL_AMP2 * Math.sin((wx + wz) * 0.034 + t * 0.34) +
+    WATER_SWELL_AMP3 *
+      (Math.sin(wx * 0.018 - wz * 0.016 + t * 0.24) +
+        Math.cos(wx * 0.011 + wz * 0.021 - t * 0.2))
+  );
+}
+
 const createWaterNormalTexture = (phase: number): THREE.DataTexture => {
   const size = 512;
   const data = new Uint8Array(size * size * 4);
@@ -46,19 +71,26 @@ const createWaterNormalTexture = (phase: number): THREE.DataTexture => {
 
 export class TerrainGenerator {
   private readonly seaBedGeometry: THREE.CircleGeometry;
-  private readonly waterGeometry: THREE.CircleGeometry;
+  private readonly waterGeometry: THREE.RingGeometry;
   private readonly blockGeometry = new RoundedBoxGeometry(1, 1, 1, 4, 0.048);
   private readonly waterNormal0 = createWaterNormalTexture(0.12);
   private readonly waterNormal1 = createWaterNormalTexture(0.57);
   private readonly blockMaterialCache = new Map<string, THREE.MeshPhysicalMaterial>();
   private readonly elevatorMeshes = new Map<string, THREE.Mesh>();
   private readonly instanceDummy = new THREE.Object3D();
+  private waterSurface: WaterSurfaceMesh | null = null;
+  private waterBasePositions: Float32Array | null = null;
 
   constructor() {
     const rWater = getWaterSurfaceRadiusWorld();
     const rSea = getSeaBedRadiusWorld();
     this.seaBedGeometry = new THREE.CircleGeometry(rSea, 96);
-    this.waterGeometry = new THREE.CircleGeometry(rWater, 192);
+    this.waterGeometry = new THREE.RingGeometry(
+      WATER_DISK_INNER_EPS,
+      rWater,
+      WATER_DISK_THETA,
+      WATER_DISK_PHI,
+    );
   }
 
   createGround(waterHighFrequencyNormal?: THREE.Texture): THREE.Group {
@@ -81,6 +113,12 @@ export class TerrainGenerator {
     seaBed.receiveShadow = true;
     group.add(seaBed);
 
+    const foamOpts = {
+      /** Tight rim at geometry/water cut; raise slightly if foam disappears. */
+      foamDepthWidth: 0.0075,
+      foamIntensity: 0.58,
+    };
+
     const waterOptions =
       waterHighFrequencyNormal !== undefined
         ? {
@@ -94,6 +132,7 @@ export class TerrainGenerator {
             standardNormalUnpack: true as const,
             normalMap0: waterHighFrequencyNormal,
             normalMap1: waterHighFrequencyNormal,
+            ...foamOpts,
           }
         : {
             color: '#4fd6da',
@@ -104,6 +143,7 @@ export class TerrainGenerator {
             standardNormalUnpack: false as const,
             normalMap0: this.waterNormal0,
             normalMap1: this.waterNormal1,
+            ...foamOpts,
           };
 
     const water = new WaterSurfaceMesh(this.waterGeometry, waterOptions);
@@ -113,6 +153,10 @@ export class TerrainGenerator {
     water.rotation.x = -Math.PI / 2;
     water.position.set(0, WATER_SURFACE_Y, 0);
     water.receiveShadow = true;
+
+    this.waterSurface = water;
+    const wPos = water.geometry.attributes.position;
+    this.waterBasePositions = new Float32Array(wPos.array);
     const waterMaterials = Array.isArray(water.material) ? water.material : [water.material];
     for (const material of waterMaterials) {
       material.side = THREE.DoubleSide;
@@ -202,6 +246,35 @@ export class TerrainGenerator {
 
       mesh.position.y = getMovingElevatorTopY(elapsed, elevator) - BLOCK_UNIT * 0.5;
     }
+
+    this.updateWaterSwell(elapsed);
+  }
+
+  /** Very soft rolling swell on the water disk (mesh Z in local space → world up after Rx(-π/2)). */
+  private updateWaterSwell(elapsed: number): void {
+    const mesh = this.waterSurface;
+    const base = this.waterBasePositions;
+    if (!mesh || !base) {
+      return;
+    }
+
+    const geo = mesh.geometry;
+    const posAttr = geo.attributes.position;
+    const arr = posAttr.array as Float32Array;
+    const n = base.length;
+
+    for (let i = 0; i < n; i += 3) {
+      const x = base[i]!;
+      const y = base[i + 1]!;
+      const z0 = base[i + 2]!;
+      const h = waterSwellHeight(x, y, elapsed);
+      arr[i] = x;
+      arr[i + 1] = y;
+      arr[i + 2] = z0 + h;
+    }
+
+    posAttr.needsUpdate = true;
+    geo.computeVertexNormals();
   }
 
   private getBlockMaterial(color: string): THREE.MeshPhysicalMaterial {

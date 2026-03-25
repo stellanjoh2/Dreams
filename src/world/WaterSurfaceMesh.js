@@ -18,6 +18,7 @@ import {
   vec2,
   viewportSafeUV,
   viewportSharedTexture,
+  viewportDepthTexture,
   reflector,
   pow,
   float,
@@ -34,6 +35,10 @@ import {
   max,
   dot,
   screenUV,
+  linearDepth,
+  smoothstep,
+  sin,
+  step,
 } from 'three/tsl';
 
 class WaterSurfaceNode extends TempNode {
@@ -58,10 +63,18 @@ class WaterSurfaceNode extends TempNode {
     this.normalStrength = uniform(
       options.normalStrength !== undefined ? options.normalStrength : 1,
     );
+    /** Linear-depth band where foam ramps — keep small for a tight rim (large values = huge halos). */
+    this.foamDepthWidth = uniform(
+      options.foamDepthWidth !== undefined ? options.foamDepthWidth : 0.0075,
+    );
+    /** Max blend toward foam tint (0–1). */
+    this.foamIntensity = uniform(options.foamIntensity !== undefined ? options.foamIntensity : 0.62);
+    this.foamTime = uniform(0);
     this.flowConfig = uniform(new Vector3());
 
     this.updateBeforeType = NodeUpdateType.RENDER;
 
+    this._foamPhase = 0;
     this._cycle = 0.15;
     this._halfCycle = this._cycle * 0.5;
 
@@ -87,6 +100,8 @@ class WaterSurfaceNode extends TempNode {
 
   updateBefore(frame) {
     this.updateFlow(frame.deltaTime);
+    this._foamPhase += frame.deltaTime;
+    this.foamTime.value = this._foamPhase;
   }
 
   setup() {
@@ -161,7 +176,32 @@ class WaterSurfaceNode extends TempNode {
       const refractorUV = screenUV.add(offset);
       const refractionSampler = viewportSharedTexture(viewportSafeUV(refractorUV));
 
-      return vec4(this.color, 1.0).mul(mix(refractionSampler, reflectionSampler, reflectance));
+      const lit = vec4(this.color, 1.0).mul(mix(refractionSampler, reflectionSampler, reflectance));
+
+      const waterLin = linearDepth();
+      const sceneUV = viewportSafeUV(refractorUV);
+      const sceneLin = linearDepth(viewportDepthTexture(sceneUV));
+      const depthDiff = abs(waterLin.sub(sceneLin));
+      const inner = float(0);
+      const foamByDepth = float(1).sub(smoothstep(inner, this.foamDepthWidth, depthDiff));
+      const foamTight = pow(foamByDepth, float(2.1));
+      const behindScene = step(waterLin.add(float(0.00012)), sceneLin);
+      const foamMask = foamTight.mul(behindScene);
+
+      const wxz = positionWorld.xz;
+      const chop = sin(wxz.x.mul(1.85).add(wxz.y.mul(1.42)).add(this.foamTime.mul(0.95)))
+        .mul(0.5)
+        .add(0.5);
+      const chop2 = sin(wxz.x.mul(-2.3).add(wxz.y.mul(2.08)).sub(this.foamTime.mul(1.12)))
+        .mul(0.5)
+        .add(0.5);
+      const foamBreak = float(0.88).add(chop.mul(0.07)).add(chop2.mul(0.05));
+
+      const foamAmt = foamMask.mul(foamBreak).mul(this.foamIntensity);
+      const foamTint = vec3(1.0, 0.985, 0.96);
+      const outRgb = mix(lit.rgb, foamTint, foamAmt);
+
+      return vec4(outRgb, lit.a);
     })();
 
     return outputNode;
