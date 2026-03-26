@@ -771,13 +771,16 @@ export const getMovingElevatorTopY = (elapsed: number, platform: MovingPlatformD
 
 export const DECOR_ANCHORS: DecorAnchor[] = [];
 
+/** Single pickup crystal hue (instanced mesh, pickup VFX, lens flare). */
+export const CRYSTAL_COLOR = '#00e8f0';
+
 export const CRYSTAL_ANCHORS: CrystalAnchor[] = [
-  { ...anchorFromTileUnits('spawn-a', 2, 2, -0.06, 0.05), color: '#e8ffa8' },
-  { ...anchorFromTileUnits('spawn-c', 2, 1, 0.05, -0.04), color: '#ffd48a' },
-  { ...anchorFromTileUnits('south-float-a', 1, 1, -0.08, 0.12), color: '#9bf4ff' },
-  { ...anchorFromTileUnits('mid-float-a', 0, 2, 0.08, -0.06), color: '#ffb7fb' },
-  { ...anchorFromTileUnits('bonus-a', 0, 2, -0.04, 0.04), color: '#b4f4ff' },
-  { ...anchorFromTileUnits('north-a', 0, 0, -0.06, 0.06), color: '#c7f1ff' },
-  { ...anchorFromTileUnits('north-c', 2, 1, -0.06, 0.06), color: '#84b7ff' },
-  { ...anchorFromTileUnits('east-b', 2, 1, 0.06, -0.08), color: '#9af6ff' },
+  { ...anchorFromTileUnits('spawn-a', 2, 2, -0.06, 0.05), color: CRYSTAL_COLOR },
+  { ...anchorFromTileUnits('spawn-c', 2, 1, 0.05, -0.04), color: CRYSTAL_COLOR },
+  { ...anchorFromTileUnits('south-float-a', 1, 1, -0.08, 0.12), color: CRYSTAL_COLOR },
+  { ...anchorFromTileUnits('mid-float-a', 0, 2, 0.08, -0.06), color: CRYSTAL_COLOR },
+  { ...anchorFromTileUnits('bonus-a', 0, 2, -0.04, 0.04), color: CRYSTAL_COLOR },
+  { ...anchorFromTileUnits('north-a', 0, 0, -0.06, 0.06), color: CRYSTAL_COLOR },
+  { ...anchorFromTileUnits('north-c', 2, 1, -0.06, 0.06), color: CRYSTAL_COLOR },
+  { ...anchorFromTileUnits('east-b', 2, 1, 0.06, -0.08), color: CRYSTAL_COLOR },
 ];

@@ -14,6 +14,9 @@ const GRASS_SCATTER_ISLAND_IDS = new Set(['south-west', 'south-central']);
 /** Horizontal footprint scale (XZ). */
 const CLUMP_SCALE = 2.5;
 
+/** XZ radius: half clump + gap (~1.5–2u extra vs prior) so barrels stay clearly outside reed meshes. */
+export const WATER_GRASS_BARREL_CLEARANCE_RADIUS = CLUMP_SCALE * 0.56 + 2.78;
+
 /** Vertical stretch vs `CLUMP_SCALE` (2× base, +25% = 2.5). */
 const HEIGHT_Y_MULT = 2.5;
 
@@ -104,7 +107,7 @@ function buildMergedGrassMeshData(
 type GrassSpot = { x: number; z: number; yaw: number };
 
 /** Grass under a platform’s XZ footprint is rarely visible (hidden from normal angles). */
-function isUnderAnyPlatformFootprint(x: number, z: number): boolean {
+export function isUnderAnyPlatformFootprint(x: number, z: number): boolean {
   const pad = BLOCK_UNIT * 0.04;
   for (const tile of PLATFORM_SURFACE_TILES) {
     const hx = tile.width * 0.5 + pad;
@@ -116,7 +119,7 @@ function isUnderAnyPlatformFootprint(x: number, z: number): boolean {
   return false;
 }
 
-function boatExclusionDistSq(x: number, z: number): number {
+export function boatExclusionDistSqFromShore(x: number, z: number): number {
   const d0 =
     (x - FISHING_BOAT_PLACEMENT_RIGHT.worldX) ** 2 + (z - FISHING_BOAT_PLACEMENT_RIGHT.worldZ) ** 2;
   const d1 =
@@ -124,14 +127,17 @@ function boatExclusionDistSq(x: number, z: number): number {
   return Math.min(d0, d1);
 }
 
-function collectShuffledCandidates(): GrassSpot[] {
-  const outwardMin = BLOCK_UNIT * -0.18;
-  const outwardMax = BLOCK_UNIT * 0.62;
+function collectShuffledEdgeCandidates(
+  islandIds: Set<string>,
+  outwardMin: number,
+  outwardMax: number,
+  saltBase: number,
+): GrassSpot[] {
   const candidates: GrassSpot[] = [];
-  let salt = 0;
+  let salt = saltBase;
 
   for (const tile of PLATFORM_SURFACE_TILES) {
-    if (!GRASS_SCATTER_ISLAND_IDS.has(tile.islandId)) {
+    if (!islandIds.has(tile.islandId)) {
       continue;
     }
     const hx = tile.width * 0.5;
@@ -182,6 +188,29 @@ function collectShuffledCandidates(): GrassSpot[] {
   return candidates;
 }
 
+function collectShuffledCandidates(): GrassSpot[] {
+  return collectShuffledEdgeCandidates(
+    GRASS_SCATTER_ISLAND_IDS,
+    BLOCK_UNIT * -0.18,
+    BLOCK_UNIT * 0.62,
+    0,
+  );
+}
+
+const BARREL_CANDIDATE_ISLAND_IDS = new Set(['south-west', 'south-central', 'midline']);
+
+/**
+ * Shore-adjacent XZ samples farther into open water than reed scatter — for props that need grass / tile clearance.
+ */
+export function collectBarrelShoreCandidateSpots(): ReadonlyArray<{ x: number; z: number }> {
+  return collectShuffledEdgeCandidates(
+    BARREL_CANDIDATE_ISLAND_IDS,
+    BLOCK_UNIT * 1.45,
+    BLOCK_UNIT * 3.85,
+    88_301,
+  );
+}
+
 function pickSpots(): GrassSpot[] {
   const candidates = collectShuffledCandidates();
   const chosen: GrassSpot[] = [];
@@ -190,7 +219,7 @@ function pickSpots(): GrassSpot[] {
     if (isUnderAnyPlatformFootprint(c.x, c.z)) {
       continue;
     }
-    if (boatExclusionDistSq(c.x, c.z) < BOAT_EXCLUSION_R_SQ) {
+    if (boatExclusionDistSqFromShore(c.x, c.z) < BOAT_EXCLUSION_R_SQ) {
       continue;
     }
     let ok = true;
@@ -211,6 +240,11 @@ function pickSpots(): GrassSpot[] {
   }
 
   return chosen;
+}
+
+/** Same XZ as each shore grass instance (deterministic; safe before GLB load). */
+export function getShoreGrassWorldSpots(): ReadonlyArray<{ x: number; z: number }> {
+  return pickSpots();
 }
 
 /**

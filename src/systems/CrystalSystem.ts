@@ -121,7 +121,7 @@ export class CrystalSystem {
         y: this.flareWorld.y,
         z: this.flareWorld.z,
         intensity: pulse,
-        color: '#b8fff0',
+        color: crystal.color,
       });
     }
   }

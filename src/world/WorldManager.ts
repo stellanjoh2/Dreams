@@ -10,6 +10,7 @@ import {
   FISHING_BOAT_PLACEMENT_LEFT,
   FISHING_BOAT_PLACEMENT_RIGHT,
 } from './FishingBoatProp';
+import { FloatingBarrelsProp } from './FloatingBarrelsProp';
 import { MountainBackdropProp } from './MountainBackdropProp';
 import { DistantPlanetsBackdrop } from './DistantPlanetsBackdrop';
 import { ButterflyScatterSystem } from './ButterflyScatterSystem';
@@ -101,6 +102,7 @@ export class WorldManager {
   private readonly fishSchools = new FishSchoolsSystem(this.worldRoot);
   private readonly fishingBoatRight = new FishingBoatProp(this.worldRoot, FISHING_BOAT_PLACEMENT_RIGHT);
   private readonly fishingBoatLeft = new FishingBoatProp(this.worldRoot, FISHING_BOAT_PLACEMENT_LEFT);
+  private readonly floatingBarrels = new FloatingBarrelsProp(this.worldRoot);
   private readonly mountainBackdrop = new MountainBackdropProp(this.worldRoot);
   private readonly distantPlanets = new DistantPlanetsBackdrop(this.worldRoot);
   private readonly terrain = new TerrainGenerator();
@@ -179,6 +181,7 @@ export class WorldManager {
     this.fishSchools.load();
     this.fishingBoatRight.load();
     this.fishingBoatLeft.load();
+    this.floatingBarrels.load();
     this.mountainBackdrop.load();
     this.distantPlanets.load();
     this.orbitingUfo.load();
@@ -246,6 +249,7 @@ export class WorldManager {
     this.butterflyScatter.update(delta, elapsed);
     this.fishingBoatRight.update(delta, elapsed);
     this.fishingBoatLeft.update(delta, elapsed);
+    this.floatingBarrels.update(delta, elapsed);
     this.cactusEnemies.update(delta, elapsed, playerPosition ?? null, camera ?? null);
   }
 

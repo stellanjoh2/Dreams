@@ -4,6 +4,11 @@ import { WATER_SURFACE_Y } from '../config/defaults';
 import { BLOCK_UNIT } from './TerrainLayout';
 
 import { publicUrl } from '../config/publicUrl';
+import {
+  applyShadowFlags,
+  normalizeVerticalForWaterline,
+  tunePropMaterialsForWater,
+} from './WaterFloatingPropUtils';
 
 const MODEL_URL = publicUrl('assets/fishing_boat_stylized.glb');
 
@@ -41,84 +46,6 @@ const BOAT_YAW = 0.95 + Math.PI + Math.PI / 2;
  * Tweak per asset: try `[0, 0, Math.PI]` if still inverted.
  */
 const MODEL_UP_FIX = new THREE.Euler(Math.PI, 0, 0);
-
-function applyShadowFlags(object: THREE.Object3D): void {
-  object.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (mesh.isMesh) {
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-    }
-  });
-}
-
-/**
- * Water is transparent with `depthWrite: false`; keep the hull **opaque** with normal depth so the GPU
- * can resolve most of the surface. Avoid extra polygonOffset on the boat — it stacks oddly with the
- * water material’s offset and can shimmer at the waterline.
- */
-function tuneBoatMaterialsForWater(object: THREE.Object3D): void {
-  object.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (!mesh.isMesh) {
-      return;
-    }
-
-    /** Draw with default opaque ordering; water mesh uses `renderOrder` 12. */
-    mesh.renderOrder = 0;
-
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const mat of materials) {
-      if (!mat) {
-        continue;
-      }
-      const m = mat as THREE.MeshPhysicalMaterial;
-      /** Leave refractive / alpha glass as authored. */
-      const transmission = 'transmission' in m ? Number(m.transmission) : 0;
-      if (transmission > 0.05) {
-        m.depthWrite = true;
-        m.depthTest = true;
-        m.needsUpdate = true;
-        continue;
-      }
-      /** Solid hull: avoid accidental transparency from the GLB (breaks vs water). */
-      if (m.opacity === undefined || m.opacity >= 0.99) {
-        m.transparent = false;
-        m.opacity = 1;
-      }
-      m.depthWrite = true;
-      m.depthTest = true;
-      m.polygonOffset = false;
-      m.needsUpdate = true;
-    }
-  });
-}
-
-/**
- * Scale to target size, center on XZ, rest bottom slightly below y=0 so the hull sits in the “water plane”.
- */
-function normalizeBoatForWaterline(model: THREE.Object3D, targetMaxExtent: number): void {
-  model.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(model);
-  if (box.isEmpty()) {
-    return;
-  }
-
-  const size = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z, 0.001);
-  const s = targetMaxExtent / maxDim;
-  model.scale.setScalar(s);
-
-  model.updateMatrixWorld(true);
-  const box2 = new THREE.Box3().setFromObject(model);
-  const center = box2.getCenter(new THREE.Vector3());
-  model.position.sub(center);
-
-  model.updateMatrixWorld(true);
-  const box3 = new THREE.Box3().setFromObject(model);
-  model.position.y -= box3.min.y;
-  model.position.y += WATERLINE_ADJUST;
-}
 
 /**
  * Picks clips that look like rig motion (flag, etc.). If none match by name, plays **all** embedded clips.
@@ -196,8 +123,8 @@ export class FishingBoatProp {
         const boat = gltf.scene;
         applyShadowFlags(boat);
         boat.rotation.copy(MODEL_UP_FIX);
-        normalizeBoatForWaterline(boat, TARGET_BOAT_EXTENT);
-        tuneBoatMaterialsForWater(boat);
+        normalizeVerticalForWaterline(boat, TARGET_BOAT_EXTENT, WATERLINE_ADJUST);
+        tunePropMaterialsForWater(boat);
         boat.traverse((child) => {
           const mesh = child as THREE.Mesh;
           if (mesh.isMesh) {
