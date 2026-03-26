@@ -34,9 +34,9 @@ export const DEFAULT_FX_SETTINGS: FxSettings = {
     lookSpeedY: 2.85,
   },
   atmosphere: {
-    fogDensity: 0.0022,
-    /** Exp2 fog — rgb(103, 148, 158); tune in FX Studio. */
-    fogColor: '#67949e',
+    fogDensity: 0.003,
+    /** Exp2 fog — rgb(120, 120, 150); tune in FX Studio. */
+    fogColor: '#787896',
     ambientIntensity: 0.15,
     hemiIntensity: 1.18,
     sunGlow: 1.28,
