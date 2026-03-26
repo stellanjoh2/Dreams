@@ -68,6 +68,7 @@ export const DEFAULT_FX_SETTINGS: FxSettings = {
     fxVolume: 1,
   },
   water: {
+    color: '#4fd6da',
     reflectionStrength: 0.3,
     reflectionContrast: 1,
     reflectivity: 0.28,

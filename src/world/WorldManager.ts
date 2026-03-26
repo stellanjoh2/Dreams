@@ -99,6 +99,8 @@ export class WorldManager {
   private readonly plantScatterRoot = new THREE.Group();
   private readonly props = new PropFactory();
   private readonly ambientDust = new AmbientDustSystem();
+  /** Skip O(n) fresnel mesh walk when only fog/water/particles/etc. changed. */
+  private fresnelSettingsSignature = '';
   private readonly fishSchools = new FishSchoolsSystem(this.worldRoot);
   private readonly fishingBoatRight = new FishingBoatProp(this.worldRoot, FISHING_BOAT_PLACEMENT_RIGHT);
   private readonly fishingBoatLeft = new FishingBoatProp(this.worldRoot, FISHING_BOAT_PLACEMENT_LEFT);
@@ -177,7 +179,7 @@ export class WorldManager {
     this.buildSun();
     this.distantBackdrop = createDistantWorldBackdrop();
     this.worldRoot.add(this.distantBackdrop);
-    this.worldRoot.add(this.terrain.createGround(waterHighFrequencyNormal));
+    this.worldRoot.add(this.terrain.createGround(waterHighFrequencyNormal, settings.water.color));
     this.fishSchools.load();
     this.fishingBoatRight.load();
     this.fishingBoatLeft.load();
@@ -306,25 +308,29 @@ export class WorldManager {
       this.scene.environment = this.environmentTexture;
     }
 
-    this.worldRoot.traverse((child) => {
-      if (!(child as THREE.Mesh).isMesh) {
-        return;
-      }
-
-      const mesh = child as THREE.Mesh;
-      const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.Material[];
-
-      materials.forEach((material: THREE.Material) => {
-        if (material && isFresnelCapableMaterial(material)) {
-          updateFresnelMaterial(
-            material,
-            settings.fresnel.color,
-            settings.fresnel.strength,
-            settings.fresnel.radius,
-          );
+    const fresnelSig = `${settings.fresnel.color}\0${settings.fresnel.strength}\0${settings.fresnel.radius}`;
+    if (fresnelSig !== this.fresnelSettingsSignature) {
+      this.fresnelSettingsSignature = fresnelSig;
+      this.worldRoot.traverse((child) => {
+        if (!(child as THREE.Mesh).isMesh) {
+          return;
         }
+
+        const mesh = child as THREE.Mesh;
+        const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.Material[];
+
+        materials.forEach((material: THREE.Material) => {
+          if (material && isFresnelCapableMaterial(material)) {
+            updateFresnelMaterial(
+              material,
+              settings.fresnel.color,
+              settings.fresnel.strength,
+              settings.fresnel.radius,
+            );
+          }
+        });
       });
-    });
+    }
   }
 
   getSunWorldPosition(target = new THREE.Vector3()): THREE.Vector3 {

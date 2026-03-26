@@ -119,7 +119,6 @@ export class AmbientDustSystem {
     this.quadWorldSize = particleSize;
     this.material.color.set(settings.color);
     this.material.opacity = count > 0 ? 0.92 : 0;
-    this.material.needsUpdate = true;
   }
 
   update(elapsed: number, camera?: THREE.Camera): void {

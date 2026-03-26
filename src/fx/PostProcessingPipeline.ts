@@ -41,6 +41,8 @@ export class PostProcessingPipeline {
   private readonly crystalPickupPulseNode;
 
   private motionBlurEnabled: boolean;
+  /** Avoid `renderPipeline.needsUpdate` when unrelated FX (e.g. water tint) changes — full graph refresh is costly. */
+  private lastPostFxUniformKey: string | null = null;
 
   constructor(
     renderer: WebGPURenderer,
@@ -137,6 +139,7 @@ export class PostProcessingPipeline {
     const motionBlurToggled = settings.motionBlur.enabled !== this.motionBlurEnabled;
     if (motionBlurToggled) {
       this.rebuildPipeline(settings);
+      this.lastPostFxUniformKey = null;
       const w = this.renderer.domElement.width;
       const h = this.renderer.domElement.height;
       if (w > 0 && h > 0) {
@@ -154,7 +157,23 @@ export class PostProcessingPipeline {
     this.saturationNode.value = settings.saturation;
     this.vignetteNode.value = settings.vignette;
     this.motionBlurIntensityNode.value = settings.motionBlur.intensity;
-    this.renderPipeline.needsUpdate = true;
+
+    const uniformKey = [
+      settings.exposure,
+      settings.contrast,
+      settings.saturation,
+      settings.vignette,
+      settings.motionBlur.intensity,
+      settings.bloom.strength,
+      settings.bloom.radius,
+      settings.bloom.threshold,
+      settings.motionBlur.enabled,
+    ].join('|');
+
+    if (motionBlurToggled || this.lastPostFxUniformKey !== uniformKey) {
+      this.lastPostFxUniformKey = uniformKey;
+      this.renderPipeline.needsUpdate = true;
+    }
   }
 
   /** 0–1 pickup “boost” tint (decay on CPU each frame). */

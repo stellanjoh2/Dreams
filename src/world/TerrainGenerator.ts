@@ -94,7 +94,8 @@ export class TerrainGenerator {
     );
   }
 
-  createGround(waterHighFrequencyNormal?: THREE.Texture): THREE.Group {
+  createGround(waterHighFrequencyNormal?: THREE.Texture, waterTint?: string): THREE.Group {
+    const waterColor = waterTint ?? '#4fd6da';
     const group = new THREE.Group();
     this.elevatorMeshes.clear();
 
@@ -123,7 +124,7 @@ export class TerrainGenerator {
     const waterOptions =
       waterHighFrequencyNormal !== undefined
         ? {
-            color: '#4fd6da',
+            color: waterColor,
             flowDirection: new THREE.Vector2(0.35, 0.18),
             flowSpeed: 0.052,
             reflectivity: 0.28,
@@ -245,6 +246,7 @@ export class TerrainGenerator {
     }
 
     type WaterUniformNode = {
+      color: { value: THREE.Color };
       reflectivity: { value: number };
       reflectionStrength: { value: number };
       reflectionContrast: { value: number };
@@ -260,6 +262,7 @@ export class TerrainGenerator {
       return;
     }
 
+    node.color.value.set(settings.color);
     node.reflectivity.value = settings.reflectivity;
     node.reflectionStrength.value = settings.reflectionStrength;
     node.reflectionContrast.value = settings.reflectionContrast;

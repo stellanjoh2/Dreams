@@ -293,6 +293,7 @@ export class FxEditor {
   private readonly fresnelColorInput: HTMLInputElement;
   private readonly fogColorInput: HTMLInputElement;
   private readonly particleColorInput: HTMLInputElement;
+  private readonly waterColorInput: HTMLInputElement;
   private readonly settings: FxSettings;
   private readonly onChange: (settings: FxSettings) => void;
   private readonly onReset: () => void;
@@ -473,6 +474,33 @@ export class FxEditor {
     particleSection.append(particleTitle, particleField);
     grid.append(particleSection);
 
+    const waterColorSection = document.createElement('section');
+    waterColorSection.className = 'editor-group';
+
+    const waterColorTitle = document.createElement('div');
+    waterColorTitle.className = 'editor-group-title';
+    waterColorTitle.textContent = 'Water Color';
+
+    const waterColorField = document.createElement('label');
+    waterColorField.className = 'editor-field';
+
+    const waterColorLabel = document.createElement('span');
+    waterColorLabel.className = 'editor-label';
+    waterColorLabel.textContent = 'Surface tint';
+
+    this.waterColorInput = document.createElement('input');
+    this.waterColorInput.className = 'editor-input';
+    this.waterColorInput.type = 'color';
+    this.waterColorInput.value = this.settings.water.color;
+    this.waterColorInput.addEventListener('input', () => {
+      this.settings.water.color = this.waterColorInput.value;
+      this.onChange(this.settings);
+    });
+
+    waterColorField.append(waterColorLabel, this.waterColorInput);
+    waterColorSection.append(waterColorTitle, waterColorField);
+    grid.append(waterColorSection);
+
     resetButton.addEventListener('click', () => this.onReset());
     mount.append(this.panel);
   }
@@ -506,6 +534,7 @@ export class FxEditor {
     this.fogColorInput.value = this.settings.atmosphere.fogColor;
     this.fresnelColorInput.value = this.settings.fresnel.color;
     this.particleColorInput.value = this.settings.particles.color;
+    this.waterColorInput.value = this.settings.water.color;
   }
 
   private getValue(key: SliderConfig['key']): number {

@@ -68,6 +68,8 @@ export interface GamepadSettings {
 
 /** Live-tunable WebGPU water surface (see `WaterSurfaceMesh`). */
 export interface WaterFxSettings {
+  /** Hex tint multiplied with refracted scene color in the water shader (`#rrggbb`). */
+  color: string;
   /** Multiplies reflection vs refraction mix (0 = mostly refracted scene). */
   reflectionStrength: number;
   /** Contrast on fresnel mix — higher = punchier glints, lower = softer water. */
