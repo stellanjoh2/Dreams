@@ -26,6 +26,10 @@ export interface GamepadSnapshot {
   interact: ButtonState;
   /** Primary attack / sword (e.g. RT on Standard gamepad mapping in many browsers). */
   primaryAttack: ButtonState;
+  /** Hide / show weapon (Y — button 3 on Standard Xbox-style layout). */
+  toggleWeaponHidden: ButtonState;
+  /** Free flight / photo cam (RS click — button 11 on Standard mapping). */
+  toggleFreeFlight: ButtonState;
   toggleEditor: ButtonState;
 }
 
@@ -48,6 +52,8 @@ export class GamepadController {
       jump: createButtonState(),
       interact: createButtonState(),
       primaryAttack: createButtonState(),
+      toggleWeaponHidden: createButtonState(),
+      toggleFreeFlight: createButtonState(),
       toggleEditor: createButtonState(),
     };
 
@@ -69,6 +75,8 @@ export class GamepadController {
     snapshot.jump = this.readButton(gamepad, 0);
     snapshot.interact = this.readButton(gamepad, 2);
     snapshot.primaryAttack = this.readButton(gamepad, 7);
+    snapshot.toggleWeaponHidden = this.readButton(gamepad, 3);
+    snapshot.toggleFreeFlight = this.readButton(gamepad, 11);
     snapshot.toggleEditor = this.readButton(gamepad, 9);
 
     return snapshot;

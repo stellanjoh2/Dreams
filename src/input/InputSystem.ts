@@ -11,6 +11,8 @@ export class InputSystem {
   private jumpQueued = false;
   private interactQueued = false;
   private primaryAttackQueued = false;
+  private toggleWeaponHiddenQueued = false;
+  private toggleFreeFlightQueued = false;
   private toggleEditorQueued = false;
 
   private readonly keyboardMove = new THREE.Vector2();
@@ -20,12 +22,14 @@ export class InputSystem {
   /** Right mouse held: zoom / aim (handled in App + camera). */
   private zoomAimHeld = false;
 
+  private static readonly keyListenerOpts: AddEventListenerOptions = { capture: true };
+
   constructor() {
     this.handleKeyDown = this.handleKeyDown.bind(this);
     this.handleKeyUp = this.handleKeyUp.bind(this);
 
-    window.addEventListener('keydown', this.handleKeyDown);
-    window.addEventListener('keyup', this.handleKeyUp);
+    window.addEventListener('keydown', this.handleKeyDown, InputSystem.keyListenerOpts);
+    window.addEventListener('keyup', this.handleKeyUp, InputSystem.keyListenerOpts);
   }
 
   /** Analog move multipliers; look rates are applied in `PlayerController` (rad/s). */
@@ -54,6 +58,14 @@ export class InputSystem {
 
     if (state.primaryAttack.justPressed) {
       this.primaryAttackQueued = true;
+    }
+
+    if (state.toggleWeaponHidden.justPressed) {
+      this.toggleWeaponHiddenQueued = true;
+    }
+
+    if (state.toggleFreeFlight.justPressed) {
+      this.toggleFreeFlightQueued = true;
     }
 
     if (state.toggleEditor.justPressed) {
@@ -118,6 +130,37 @@ export class InputSystem {
     return value;
   }
 
+  consumeToggleWeaponHidden(): boolean {
+    const value = this.toggleWeaponHiddenQueued;
+    this.toggleWeaponHiddenQueued = false;
+    return value;
+  }
+
+  consumeToggleFreeFlight(): boolean {
+    const value = this.toggleFreeFlightQueued;
+    this.toggleFreeFlightQueued = false;
+    return value;
+  }
+
+  /** Space up, Ctrl down — used only in free-flight mode (does not consume jump). */
+  getFreeFlightVerticalAxis(): number {
+    let v = 0;
+    if (this.pressedKeys.has('Space')) {
+      v += 1;
+    }
+    if (this.pressedKeys.has('ControlLeft') || this.pressedKeys.has('ControlRight')) {
+      v -= 1;
+    }
+    return v;
+  }
+
+  /** Avoid buffered actions firing when returning to the player from free flight. */
+  clearTransientActionQueuesForFreeFlight(): void {
+    this.jumpQueued = false;
+    this.interactQueued = false;
+    this.primaryAttackQueued = false;
+  }
+
   consumeToggleEditor(): boolean {
     const value = this.toggleEditorQueued;
     this.toggleEditorQueued = false;
@@ -149,14 +192,40 @@ export class InputSystem {
       this.toggleEditorQueued = true;
       event.preventDefault();
     }
+
+    if (event.code === 'KeyH' && !event.repeat) {
+      if (!this.shouldIgnoreGameKeyTarget(event.target)) {
+        this.toggleWeaponHiddenQueued = true;
+      }
+    }
+
+    if (event.code === 'KeyF' && !event.repeat) {
+      if (!this.shouldIgnoreGameKeyTarget(event.target)) {
+        event.preventDefault();
+        this.toggleFreeFlightQueued = true;
+      }
+    }
   }
 
   private handleKeyUp(event: KeyboardEvent): void {
     this.pressedKeys.delete(event.code);
   }
 
+  /** Don’t steal keys from range inputs / the FX editor fields. */
+  private shouldIgnoreGameKeyTarget(target: EventTarget | null): boolean {
+    const el = target as HTMLElement | null;
+    if (!el) {
+      return false;
+    }
+    const tag = el.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') {
+      return true;
+    }
+    return Boolean(el.isContentEditable);
+  }
+
   dispose(): void {
-    window.removeEventListener('keydown', this.handleKeyDown);
-    window.removeEventListener('keyup', this.handleKeyUp);
+    window.removeEventListener('keydown', this.handleKeyDown, InputSystem.keyListenerOpts);
+    window.removeEventListener('keyup', this.handleKeyUp, InputSystem.keyListenerOpts);
   }
 }

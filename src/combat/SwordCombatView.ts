@@ -51,6 +51,8 @@ export class SwordCombatView {
   private animTime = 0;
   /** ±1 per swing: alternates slash direction for bigger, varied arcs. */
   private swingDir = 1;
+  /** Holstered: no draw, no attacks (toggle H / gamepad Y). */
+  private weaponHidden = false;
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.holder = new THREE.Group();
@@ -99,8 +101,21 @@ export class SwordCombatView {
     this.loaded = true;
   }
 
-  setVisible(visible: boolean): void {
-    this.holder.visible = visible && this.loaded;
+  /** Pointer-lock gameplay context: weapon shows only when active and not holstered. */
+  setGameplayVisible(combatActive: boolean): void {
+    this.holder.visible = this.loaded && combatActive && !this.weaponHidden;
+  }
+
+  toggleWeaponHidden(): void {
+    this.weaponHidden = !this.weaponHidden;
+    if (this.weaponHidden) {
+      this.phase = 'idle';
+      this.applyIdleTransform();
+    }
+  }
+
+  isWeaponHidden(): boolean {
+    return this.weaponHidden;
   }
 
   dispose(): void {
@@ -109,7 +124,7 @@ export class SwordCombatView {
 
   /** Start swing or stab if idle; otherwise ignored (no animation stacking). */
   triggerAttack(): void {
-    if (!this.loaded || this.phase !== 'idle') {
+    if (!this.loaded || this.weaponHidden || this.phase !== 'idle') {
       return;
     }
     if (Math.random() < 0.5) {
@@ -123,6 +138,14 @@ export class SwordCombatView {
 
   update(delta: number): void {
     if (!this.loaded) {
+      return;
+    }
+
+    if (this.weaponHidden) {
+      if (this.phase !== 'idle') {
+        this.phase = 'idle';
+        this.applyIdleTransform();
+      }
       return;
     }
 

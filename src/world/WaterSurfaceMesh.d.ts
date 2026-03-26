@@ -5,6 +5,10 @@ export type WaterSurfaceMeshOptions = {
   flowDirection?: Vector2;
   flowSpeed?: number;
   reflectivity?: number;
+  /** Scales reflection amount in the refraction/reflection mix (default 1). */
+  reflectionStrength?: number;
+  /** Pow on fresnel mix factor (default 1). */
+  reflectionContrast?: number;
   scale?: number;
   /** UV distortion from normals (default 0.034). */
   normalDistort?: number;

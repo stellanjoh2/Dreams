@@ -29,7 +29,15 @@ type SliderConfig = {
     | 'cameraFeel.normalFov'
     | 'cameraFeel.fastFov'
     | 'audio.musicVolume'
-    | 'audio.fxVolume';
+    | 'audio.fxVolume'
+    | 'water.reflectionStrength'
+    | 'water.reflectionContrast'
+    | 'water.reflectivity'
+    | 'water.normalStrength'
+    | 'water.waveScale'
+    | 'water.flowSpeed'
+    | 'water.foamIntensity'
+    | 'water.normalDistort';
   label: string;
   min: number;
   max: number;
@@ -114,6 +122,75 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
     fields: [
       { key: 'fresnel.strength', label: 'Fresnel Strength', min: 0, max: 0.6, step: 0.01 },
       { key: 'fresnel.radius', label: 'Fresnel Radius', min: 0.05, max: 1, step: 0.01 },
+    ],
+  },
+  {
+    title: 'Water',
+    fields: [
+      {
+        key: 'water.reflectionStrength',
+        label: 'Reflection strength',
+        min: 0,
+        max: 2.5,
+        step: 0.02,
+        format: (value) => value.toFixed(2),
+      },
+      {
+        key: 'water.reflectionContrast',
+        label: 'Reflection contrast',
+        min: 0.2,
+        max: 3,
+        step: 0.02,
+        format: (value) => value.toFixed(2),
+      },
+      {
+        key: 'water.reflectivity',
+        label: 'Fresnel base (min reflect)',
+        min: 0,
+        max: 0.55,
+        step: 0.01,
+        format: (value) => value.toFixed(2),
+      },
+      {
+        key: 'water.normalStrength',
+        label: 'Ripple / normal strength',
+        min: 0.1,
+        max: 1.5,
+        step: 0.01,
+        format: (value) => value.toFixed(2),
+      },
+      {
+        key: 'water.waveScale',
+        label: 'Wave scale (UV tiling)',
+        min: 2,
+        max: 48,
+        step: 0.5,
+        format: (value) => value.toFixed(1),
+      },
+      {
+        key: 'water.flowSpeed',
+        label: 'Flow speed',
+        min: 0,
+        max: 0.2,
+        step: 0.002,
+        format: (value) => value.toFixed(3),
+      },
+      {
+        key: 'water.foamIntensity',
+        label: 'Shore foam',
+        min: 0,
+        max: 1.2,
+        step: 0.01,
+        format: (value) => value.toFixed(2),
+      },
+      {
+        key: 'water.normalDistort',
+        label: 'Reflection distortion',
+        min: 0,
+        max: 0.08,
+        step: 0.001,
+        format: (value) => value.toFixed(3),
+      },
     ],
   },
   {
@@ -214,6 +291,7 @@ export class FxEditor {
   private readonly values = new Map<string, HTMLSpanElement>();
   private readonly motionBlurEnabledInput: HTMLInputElement;
   private readonly fresnelColorInput: HTMLInputElement;
+  private readonly fogColorInput: HTMLInputElement;
   private readonly particleColorInput: HTMLInputElement;
   private readonly settings: FxSettings;
   private readonly onChange: (settings: FxSettings) => void;
@@ -314,6 +392,33 @@ export class FxEditor {
       grid.append(section);
     });
 
+    const fogSection = document.createElement('section');
+    fogSection.className = 'editor-group';
+
+    const fogTitle = document.createElement('div');
+    fogTitle.className = 'editor-group-title';
+    fogTitle.textContent = 'Fog Color';
+
+    const fogField = document.createElement('label');
+    fogField.className = 'editor-field';
+
+    const fogLabel = document.createElement('span');
+    fogLabel.className = 'editor-label';
+    fogLabel.textContent = 'Distance haze';
+
+    this.fogColorInput = document.createElement('input');
+    this.fogColorInput.className = 'editor-input';
+    this.fogColorInput.type = 'color';
+    this.fogColorInput.value = this.settings.atmosphere.fogColor;
+    this.fogColorInput.addEventListener('input', () => {
+      this.settings.atmosphere.fogColor = this.fogColorInput.value;
+      this.onChange(this.settings);
+    });
+
+    fogField.append(fogLabel, this.fogColorInput);
+    fogSection.append(fogTitle, fogField);
+    grid.append(fogSection);
+
     const fresnelSection = document.createElement('section');
     fresnelSection.className = 'editor-group';
 
@@ -398,6 +503,7 @@ export class FxEditor {
       }
     });
 
+    this.fogColorInput.value = this.settings.atmosphere.fogColor;
     this.fresnelColorInput.value = this.settings.fresnel.color;
     this.particleColorInput.value = this.settings.particles.color;
   }

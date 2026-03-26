@@ -47,12 +47,6 @@ const CLOUD_SCALE_MAX_MULT = 1.92;
 /** Tiny vertical bob on top of orbit height (scaled with cloud size). */
 const BOB_AMPLITUDE = BLOCK_UNIT * 0.96;
 
-/** Slightly dim albedo so AO crevices read softer; emissive lift adds a flat glow that fills dark patches. */
-const CLOUD_ALBEDO_AFTER_PRIOR_LIFT = 0.87 + (1 - 0.87) * 0.25;
-/** +50% brighter vs prior: move halfway again from current dim toward full albedo. */
-const CLOUD_ALBEDO_DIM = CLOUD_ALBEDO_AFTER_PRIOR_LIFT + (1 - CLOUD_ALBEDO_AFTER_PRIOR_LIFT) * 0.5;
-/** Emissive = this fraction × **original** albedo color (before dim); +50% vs prior (`0.085 × 1.25 × 1.5`). */
-const CLOUD_EMISSIVE_FROM_ALBEDO = 0.085 * 1.25 * 1.5;
 const BOB_SPEED = 0.18;
 
 /** Smooth turn toward playfield focal point (higher = snappier). */
@@ -216,6 +210,31 @@ function normalizeTemplateToOrigin(obj: THREE.Object3D, targetMaxDim: number): v
   obj.position.sub(center);
 }
 
+function stripMaterialMaps(m: THREE.Material): void {
+  const any = m as THREE.MeshStandardMaterial & {
+    map?: THREE.Texture | null;
+    normalMap?: THREE.Texture | null;
+    roughnessMap?: THREE.Texture | null;
+    metalnessMap?: THREE.Texture | null;
+    aoMap?: THREE.Texture | null;
+    alphaMap?: THREE.Texture | null;
+    emissiveMap?: THREE.Texture | null;
+    lightMap?: THREE.Texture | null;
+    bumpMap?: THREE.Texture | null;
+    displacementMap?: THREE.Texture | null;
+  };
+  any.map = null;
+  any.normalMap = null;
+  any.roughnessMap = null;
+  any.metalnessMap = null;
+  any.aoMap = null;
+  any.alphaMap = null;
+  any.emissiveMap = null;
+  any.lightMap = null;
+  any.bumpMap = null;
+  any.displacementMap = null;
+}
+
 function tuneCloudMaterial(mat: THREE.Material): void {
   const isStd = mat instanceof THREE.MeshStandardMaterial || mat instanceof THREE.MeshPhysicalMaterial;
   const isPhong = mat instanceof THREE.MeshPhongMaterial;
@@ -224,17 +243,17 @@ function tuneCloudMaterial(mat: THREE.Material): void {
     return;
   }
 
+  stripMaterialMaps(mat);
+
   const m = mat as THREE.MeshStandardMaterial | THREE.MeshPhongMaterial | THREE.MeshLambertMaterial;
-  const preDim = m.color.clone();
-  m.color.multiplyScalar(CLOUD_ALBEDO_DIM);
-  m.emissive.copy(preDim).multiplyScalar(CLOUD_EMISSIVE_FROM_ALBEDO);
-  m.emissiveIntensity = 1;
+  m.emissive.setRGB(0, 0, 0);
+  m.emissiveIntensity = 0;
 
   if (isStd) {
     const std = mat as THREE.MeshStandardMaterial;
     std.metalness = 0;
-    std.roughness = 1;
-    std.envMapIntensity = 0;
+    std.roughness = 0.9;
+    std.envMapIntensity = 0.48;
     if (mat instanceof THREE.MeshPhysicalMaterial) {
       const phys = mat;
       phys.specularIntensity = 0;
@@ -256,6 +275,21 @@ function tuneCloudMaterial(mat: THREE.Material): void {
   mat.needsUpdate = true;
 }
 
+function basicToStandardCloud(basic: THREE.MeshBasicMaterial): THREE.MeshStandardMaterial {
+  const std = new THREE.MeshStandardMaterial({
+    fog: true,
+    metalness: 0,
+    roughness: 0.9,
+    envMapIntensity: 0.48,
+  });
+  std.color.copy(basic.color);
+  std.opacity = basic.opacity;
+  std.transparent = basic.transparent;
+  std.depthWrite = basic.depthWrite;
+  std.side = basic.side;
+  return std;
+}
+
 function prepareCloudGraph(obj: THREE.Object3D): void {
   obj.traverse((node) => {
     const m = node as THREE.Mesh;
@@ -263,10 +297,18 @@ function prepareCloudGraph(obj: THREE.Object3D): void {
       m.castShadow = false;
       m.receiveShadow = false;
       m.frustumCulled = true;
-      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      const mats = Array.isArray(m.material) ? [...m.material] : [m.material];
+      const next: THREE.Material[] = [];
       for (const mat of mats) {
-        tuneCloudMaterial(mat);
+        if (mat instanceof THREE.MeshBasicMaterial) {
+          next.push(basicToStandardCloud(mat));
+          mat.dispose();
+        } else {
+          tuneCloudMaterial(mat);
+          next.push(mat);
+        }
       }
+      m.material = next.length === 1 ? next[0]! : next;
     }
   });
 }

@@ -33,6 +33,7 @@ import {
   vec3,
   normalize,
   max,
+  min,
   dot,
   screenUV,
   linearDepth,
@@ -59,6 +60,14 @@ class WaterSurfaceNode extends TempNode {
     this.flowDirection = uniform(options.flowDirection !== undefined ? options.flowDirection : new Vector2(1, 0));
     this.flowSpeed = uniform(options.flowSpeed !== undefined ? options.flowSpeed : 0.03);
     this.reflectivity = uniform(options.reflectivity !== undefined ? options.reflectivity : 0.02);
+    /** Scales reflection vs refraction mix (1 = authored balance). */
+    this.reflectionStrength = uniform(
+      options.reflectionStrength !== undefined ? options.reflectionStrength : 1,
+    );
+    /** Pow on fresnel mix; above 1 = sharper highlights, below 1 = broader reflection. */
+    this.reflectionContrast = uniform(
+      options.reflectionContrast !== undefined ? options.reflectionContrast : 1,
+    );
     this.scale = uniform(options.scale !== undefined ? options.scale : 1);
     this.normalStrength = uniform(
       options.normalStrength !== undefined ? options.normalStrength : 1,
@@ -68,7 +77,7 @@ class WaterSurfaceNode extends TempNode {
       options.foamDepthWidth !== undefined ? options.foamDepthWidth : 0.0075,
     );
     /** Max blend toward foam tint (0–1). */
-    this.foamIntensity = uniform(options.foamIntensity !== undefined ? options.foamIntensity : 0.62);
+    this.foamIntensity = uniform(options.foamIntensity !== undefined ? options.foamIntensity : 0.16);
     this.foamTime = uniform(0);
     this.flowConfig = uniform(new Vector3());
 
@@ -81,7 +90,7 @@ class WaterSurfaceNode extends TempNode {
     this._USE_FLOW = options.flowMap !== undefined;
     /** Procedural normals used a custom RGB packing; tiling PNGs are standard tangent-space. */
     this._STANDARD_NORMAL_UNPACK = options.standardNormalUnpack === true;
-    this._normalDistort = options.normalDistort !== undefined ? options.normalDistort : 0.034;
+    this.normalDistort = uniform(options.normalDistort !== undefined ? options.normalDistort : 0.034);
   }
 
   updateFlow(delta) {
@@ -166,7 +175,10 @@ class WaterSurfaceNode extends TempNode {
         .mul(float(1.0).sub(this.reflectivity))
         .add(this.reflectivity);
 
-      const distort = float(this._normalDistort);
+      const contrasted = pow(reflectance, max(this.reflectionContrast, float(0.02)));
+      const mixFactor = min(contrasted.mul(this.reflectionStrength), float(1.0));
+
+      const distort = this.normalDistort;
       const offset = (
         this._STANDARD_NORMAL_UNPACK === true ? normal.xy.mul(distort) : normal.xz.mul(distort)
       ).toVar();
@@ -176,7 +188,7 @@ class WaterSurfaceNode extends TempNode {
       const refractorUV = screenUV.add(offset);
       const refractionSampler = viewportSharedTexture(viewportSafeUV(refractorUV));
 
-      const lit = vec4(this.color, 1.0).mul(mix(refractionSampler, reflectionSampler, reflectance));
+      const lit = vec4(this.color, 1.0).mul(mix(refractionSampler, reflectionSampler, mixFactor));
 
       const waterLin = linearDepth();
       const sceneUV = viewportSafeUV(refractorUV);

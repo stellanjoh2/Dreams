@@ -19,9 +19,9 @@ export const DEFAULT_FX_SETTINGS: FxSettings = {
   saturation: 1.56,
   vignette: 1.5,
   bloom: {
-    strength: 1.17,
-    radius: 0.5,
-    threshold: 0.72,
+    strength: 0.5,
+    radius: 0.2,
+    threshold: 1,
   },
   motionBlur: {
     enabled: true,
@@ -34,11 +34,12 @@ export const DEFAULT_FX_SETTINGS: FxSettings = {
     lookSpeedY: 2.85,
   },
   atmosphere: {
-    fogDensity: 0.002,
-    skyColor: '#d5c4ff',
-    ambientIntensity: 0.13,
-    hemiIntensity: 1.22,
-    sunGlow: 1.25,
+    fogDensity: 0.0022,
+    /** Exp2 fog — rgb(103, 148, 158); tune in FX Studio. */
+    fogColor: '#67949e',
+    ambientIntensity: 0.15,
+    hemiIntensity: 1.18,
+    sunGlow: 1.28,
   },
   cameraFeel: {
     lookSensitivity: 0.0025,
@@ -65,5 +66,15 @@ export const DEFAULT_FX_SETTINGS: FxSettings = {
   audio: {
     musicVolume: 0.65,
     fxVolume: 1,
+  },
+  water: {
+    reflectionStrength: 0.3,
+    reflectionContrast: 1,
+    reflectivity: 0.28,
+    normalStrength: 0.92,
+    waveScale: 26,
+    flowSpeed: 0.052,
+    foamIntensity: 0.16,
+    normalDistort: 0.024,
   },
 };

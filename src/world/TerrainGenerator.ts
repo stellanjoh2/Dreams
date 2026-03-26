@@ -3,6 +3,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { WaterSurfaceMesh } from './WaterSurfaceMesh.js';
 import { BLOCK_UNIT, JUMP_PADS, MOVING_ELEVATORS, PLATFORM_TILES, getMovingElevatorTopY } from './TerrainLayout';
 import { WATER_SURFACE_Y, WORLD_FLOOR_Y } from '../config/defaults';
+import type { WaterFxSettings } from '../fx/FxSettings';
 import { createMetallicFlakeOrmTexture } from '../materials/MetallicFlakeDetail';
 import { getSeaBedRadiusWorld, getWaterSurfaceRadiusWorld } from './worldHorizon';
 
@@ -116,7 +117,7 @@ export class TerrainGenerator {
     const foamOpts = {
       /** Tight rim at geometry/water cut; raise slightly if foam disappears. */
       foamDepthWidth: 0.0075,
-      foamIntensity: 0.58,
+      foamIntensity: 0.16,
     };
 
     const waterOptions =
@@ -235,6 +236,38 @@ export class TerrainGenerator {
     }
 
     return group;
+  }
+
+  applyWaterFxSettings(settings: WaterFxSettings): void {
+    const water = this.waterSurface;
+    if (!water) {
+      return;
+    }
+
+    type WaterUniformNode = {
+      reflectivity: { value: number };
+      reflectionStrength: { value: number };
+      reflectionContrast: { value: number };
+      scale: { value: number };
+      normalStrength: { value: number };
+      flowSpeed: { value: number };
+      foamIntensity: { value: number };
+      normalDistort: { value: number };
+    };
+
+    const node = (water.material as { colorNode?: WaterUniformNode }).colorNode;
+    if (!node?.reflectivity) {
+      return;
+    }
+
+    node.reflectivity.value = settings.reflectivity;
+    node.reflectionStrength.value = settings.reflectionStrength;
+    node.reflectionContrast.value = settings.reflectionContrast;
+    node.scale.value = settings.waveScale;
+    node.normalStrength.value = settings.normalStrength;
+    node.flowSpeed.value = settings.flowSpeed;
+    node.foamIntensity.value = settings.foamIntensity;
+    node.normalDistort.value = settings.normalDistort;
   }
 
   update(elapsed: number): void {

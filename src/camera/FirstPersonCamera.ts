@@ -104,6 +104,22 @@ export class FirstPersonCamera {
     this.camera.position.y = clampToFloor ? Math.max(WORLD_FLOOR_Y + PLAYER_EYE_HEIGHT, targetY) : targetY;
   }
 
+  /** Free-flight / photo mode: FOV + zoom only (no head bob or position coupling). */
+  applyFreeFlightFov(
+    delta: number,
+    zoomAim: boolean,
+    normalFov: number,
+    zoomFov = 30,
+  ): void {
+    const safeNormalFov = Math.max(40, normalFov);
+    const targetFov = zoomAim
+      ? THREE.MathUtils.clamp(zoomFov, 18, 45)
+      : safeNormalFov;
+    const dampSpeed = zoomAim ? 16 : 8.2;
+    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, dampSpeed, delta);
+    this.camera.updateProjectionMatrix();
+  }
+
   getForwardVector(target = new THREE.Vector3()): THREE.Vector3 {
     target.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)).normalize().negate();
     return target;

@@ -6,7 +6,8 @@ export interface BloomSettings {
 
 export interface AtmosphereSettings {
   fogDensity: number;
-  skyColor: string;
+  /** Exp2 fog tint (`THREE.FogExp2.color`). */
+  fogColor: string;
   ambientIntensity: number;
   hemiIntensity: number;
   sunGlow: number;
@@ -65,6 +66,24 @@ export interface GamepadSettings {
   lookSpeedY: number;
 }
 
+/** Live-tunable WebGPU water surface (see `WaterSurfaceMesh`). */
+export interface WaterFxSettings {
+  /** Multiplies reflection vs refraction mix (0 = mostly refracted scene). */
+  reflectionStrength: number;
+  /** Contrast on fresnel mix — higher = punchier glints, lower = softer water. */
+  reflectionContrast: number;
+  /** Base fresnel term in the water shader (min reflection at normal incidence). */
+  reflectivity: number;
+  /** Normal map blend — ripple strength. */
+  normalStrength: number;
+  /** UV scale — smaller waves / tighter ripples when higher. */
+  waveScale: number;
+  flowSpeed: number;
+  foamIntensity: number;
+  /** UV offset strength for reflection/refraction distortion. */
+  normalDistort: number;
+}
+
 export interface FxSettings {
   exposure: number;
   contrast: number;
@@ -79,6 +98,7 @@ export interface FxSettings {
   movement: MovementSettings;
   particles: ParticleSettings;
   audio: AudioVolumeSettings;
+  water: WaterFxSettings;
 }
 
-export const FX_SETTINGS_STORAGE_KEY = 'candylands.fx.settings.v6';
+export const FX_SETTINGS_STORAGE_KEY = 'candylands.fx.settings.v7';

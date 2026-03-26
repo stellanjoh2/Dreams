@@ -162,9 +162,9 @@ export class WorldManager {
   }
 
   build(settings: FxSettings, waterHighFrequencyNormal?: THREE.Texture): CrystalInstance[] {
-    this.scene.background = new THREE.Color('#8fb7ff');
+    this.scene.background = new THREE.Color('#2d6fb3');
     this.scene.fog = new THREE.FogExp2(
-      new THREE.Color(settings.atmosphere.skyColor),
+      new THREE.Color(settings.atmosphere.fogColor),
       settings.atmosphere.fogDensity,
     );
 
@@ -268,31 +268,35 @@ export class WorldManager {
   }
 
   applyFxSettings(settings: FxSettings): void {
-    this.scene.background = new THREE.Color('#8fb7ff');
+    this.scene.background = new THREE.Color('#2d6fb3');
 
     if (this.scene.fog instanceof THREE.FogExp2) {
-      this.scene.fog.color.set(settings.atmosphere.skyColor);
+      this.scene.fog.color.set(settings.atmosphere.fogColor);
       this.scene.fog.density = settings.atmosphere.fogDensity;
     }
 
     if (this.ambientLight) {
+      this.ambientLight.color.set('#d8e6f0');
       this.ambientLight.intensity = settings.atmosphere.ambientIntensity;
     }
 
     if (this.hemiLight) {
+      this.hemiLight.color.set('#8ebfe0');
+      this.hemiLight.groundColor.set('#f2e0c8');
       this.hemiLight.intensity = settings.atmosphere.hemiIntensity;
     }
 
     if (this.sunSprite?.material instanceof THREE.SpriteMaterial) {
-      this.sunSprite.material.color.set('#ffe8c8');
+      this.sunSprite.material.color.set('#ffd0a0');
     }
 
     if (this.sunLight) {
       this.sunLight.intensity = 3.45 * settings.atmosphere.sunGlow;
-      this.sunLight.color.set('#ffd6a0');
+      this.sunLight.color.set('#ffb060');
     }
 
     this.ambientDust.applySettings(settings.particles);
+    this.terrain.applyWaterFxSettings(settings.water);
 
     if (this.environmentTexture) {
       this.scene.environment = this.environmentTexture;
@@ -365,17 +369,17 @@ export class WorldManager {
   }
 
   private buildLights(settings: FxSettings): void {
-    this.ambientLight = new THREE.AmbientLight('#fff4fb', settings.atmosphere.ambientIntensity);
+    this.ambientLight = new THREE.AmbientLight('#d8e6f0', settings.atmosphere.ambientIntensity);
     this.scene.add(this.ambientLight);
 
     this.hemiLight = new THREE.HemisphereLight(
-      '#8eb2ff',
-      '#ffc1de',
+      '#8ebfe0',
+      '#f2e0c8',
       settings.atmosphere.hemiIntensity,
     );
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#ffd6a0', 3.45 * settings.atmosphere.sunGlow);
+    this.sunLight = new THREE.DirectionalLight('#ffb060', 3.45 * settings.atmosphere.sunGlow);
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.set(1536, 1536);
     this.sunLight.shadow.bias = -0.00008;
@@ -403,7 +407,7 @@ export class WorldManager {
     const blobTex = WorldManager.createSunBlobTexture();
     const mat = new THREE.SpriteMaterial({
       map: blobTex,
-      color: new THREE.Color('#ffe8c8'),
+      color: new THREE.Color('#ffd0a0'),
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -481,7 +485,7 @@ export class WorldManager {
     const skyMaterial = new THREE.MeshBasicMaterial({
       map: skyTexture,
       side: THREE.BackSide,
-      fog: false,
+      fog: true,
       depthWrite: false,
     });
 
@@ -981,11 +985,15 @@ export class WorldManager {
       throw new Error('Candy Lands could not create the sky gradient context.');
     }
 
+    /** Zenith → horizon: shorter cool band so peach/cream/gold read in mid-sky, not only at the rim. */
     const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
-    gradient.addColorStop(0, '#5f95ff');
-    gradient.addColorStop(0.28, '#8fa7ff');
-    gradient.addColorStop(0.62, '#d3b4ff');
-    gradient.addColorStop(1, '#ffbfdc');
+    gradient.addColorStop(0, '#2d6fb3');
+    gradient.addColorStop(0.14, '#4ba6cf');
+    gradient.addColorStop(0.32, '#a1c2cf');
+    gradient.addColorStop(0.48, '#e8d0c4');
+    gradient.addColorStop(0.6, '#f9dfa8');
+    gradient.addColorStop(0.78, '#f2b078');
+    gradient.addColorStop(1, '#efa055');
     context.fillStyle = gradient;
     context.fillRect(0, 0, canvas.width, canvas.height);
 

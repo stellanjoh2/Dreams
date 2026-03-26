@@ -4,6 +4,7 @@ import { DEFAULT_FX_SETTINGS, ENABLE_EMISSIVE_LENS_FLARE } from '../config/defau
 import { loadDataTexture } from '../config/loadTexture';
 import { publicUrl } from '../config/publicUrl';
 import { FirstPersonCamera } from '../camera/FirstPersonCamera';
+import { updateFreeFlight } from '../camera/FreeFlightController';
 import { RendererCore } from './RendererCore';
 import { WorldManager } from '../world/WorldManager';
 import { InputSystem } from '../input/InputSystem';
@@ -40,6 +41,8 @@ export class App {
   private editor?: FxEditor;
   private lensFlare?: LensFlareOverlay;
   private swordCombat?: SwordCombatView;
+  /** Detached fly cam; player frozen until toggled off (F / gamepad RS click). */
+  private freeFlightActive = false;
 
   private lastFrame = 0;
   private readonly cameraPosition = new THREE.Vector3();
@@ -208,6 +211,7 @@ export class App {
     Object.assign(this.settings.audio, fresh.audio);
     Object.assign(this.settings.motionBlur, fresh.motionBlur);
     Object.assign(this.settings.gamepad, fresh.gamepad);
+    Object.assign(this.settings.water, fresh.water);
     this.applySettings();
   }
 
@@ -235,8 +239,22 @@ export class App {
     this.input.update();
 
     const combatUiOk = !this.editor?.isOpen;
-    const combatActive = this.cameraSystem.locked && combatUiOk;
-    this.swordCombat?.setVisible(combatActive);
+    if (this.input.consumeToggleFreeFlight()) {
+      if (combatUiOk) {
+        this.freeFlightActive = !this.freeFlightActive;
+        if (this.freeFlightActive) {
+          this.input.clearTransientActionQueuesForFreeFlight();
+        }
+      }
+    }
+
+    const combatActive = this.cameraSystem.locked && combatUiOk && !this.freeFlightActive;
+    if (this.input.consumeToggleWeaponHidden()) {
+      if (combatActive) {
+        this.swordCombat?.toggleWeaponHidden();
+      }
+    }
+    this.swordCombat?.setGameplayVisible(combatActive);
     this.swordCombat?.update(delta);
     if (combatActive && this.input.consumePrimaryAttack()) {
       this.swordCombat?.triggerAttack();
@@ -244,15 +262,22 @@ export class App {
 
     if (this.input.consumeToggleEditor()) {
       this.editor?.toggle();
-      if (this.editor?.isOpen && document.pointerLockElement) {
-        void document.exitPointerLock();
+      if (this.editor?.isOpen) {
+        this.freeFlightActive = false;
+        if (document.pointerLockElement) {
+          void document.exitPointerLock();
+        }
       }
     }
 
     this.world.syncDynamicPlatforms(elapsed);
     this.audio.tickElevatorSounds(elapsed, this.cameraSystem.camera);
 
-    if (this.cameraSystem.locked) {
+    if (this.freeFlightActive) {
+      this.input.consumeJump();
+      this.input.consumeInteract();
+      updateFreeFlight(delta, this.cameraSystem, this.input, this.settings);
+    } else if (this.cameraSystem.locked) {
       this.player.update(
         delta,
         this.input,
@@ -275,7 +300,9 @@ export class App {
 
     this.world.update(delta, elapsed, this.cameraSystem.camera, this.player.position);
     this.crystalSystem.update(delta);
-    this.interactionSystem?.update(this.cameraSystem.getPosition(this.cameraPosition), this.input);
+    if (!this.freeFlightActive) {
+      this.interactionSystem?.update(this.cameraSystem.getPosition(this.cameraPosition), this.input);
+    }
     this.postProcessing?.setCrystalPickupPulse(this.crystalSystem.getScreenPickupPulse());
     this.ui.setUnderwaterDepth(this.player.getWaterSubmersionDepth());
     const { width, height, changed } = this.rendererCore.syncSize();
@@ -315,11 +342,23 @@ export class App {
       }
 
       const parsed = JSON.parse(stored) as Partial<FxSettings>;
+      const mergedAtmosphere = { ...fresh.atmosphere, ...parsed.atmosphere };
+      const legacyAtmosphere = parsed.atmosphere as
+        | { fogColor?: unknown; skyColor?: string }
+        | undefined;
+      if (
+        legacyAtmosphere &&
+        typeof legacyAtmosphere.fogColor !== 'string' &&
+        typeof legacyAtmosphere.skyColor === 'string'
+      ) {
+        mergedAtmosphere.fogColor = legacyAtmosphere.skyColor;
+      }
+
       const merged: FxSettings = {
         ...fresh,
         ...parsed,
         bloom: { ...fresh.bloom, ...parsed.bloom },
-        atmosphere: { ...fresh.atmosphere, ...parsed.atmosphere },
+        atmosphere: mergedAtmosphere,
         cameraFeel: { ...fresh.cameraFeel, ...parsed.cameraFeel },
         fresnel: { ...fresh.fresnel, ...parsed.fresnel },
         movement: { ...fresh.movement, ...parsed.movement },
@@ -327,6 +366,7 @@ export class App {
         audio: { ...fresh.audio, ...(parsed.audio ?? {}) },
         motionBlur: { ...fresh.motionBlur, ...(parsed.motionBlur ?? {}) },
         gamepad: { ...fresh.gamepad, ...(parsed.gamepad ?? {}) },
+        water: { ...fresh.water, ...(parsed.water ?? {}) },
       };
       const m = Number(merged.audio.musicVolume);
       const f = Number(merged.audio.fxVolume);

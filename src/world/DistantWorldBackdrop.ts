@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { WORLD_FLOOR_Y } from '../config/defaults';
-import { createBackdropGridMaterial } from '../materials/BackdropGridMaterial';
+import { createBackdropLitMaterial } from '../materials/BackdropGridMaterial';
 import { BLOCK_UNIT, PLATFORM_TILES } from './TerrainLayout';
 
 /** Matches `BLOCK_COLOR_PALETTE` in TerrainLayout — candy platforms in the distance. */
@@ -554,8 +554,7 @@ function tryPushBackdropInstance(
 
 /**
  * Square **annulus** (L∞ distance from play centroid) so backdrop sits evenly on all sides.
- * Integer `n×BLOCK_UNIT` sizes + snapped origins so the **world-space** grid on backdrop materials
- * shows square cells with edges on grid lines.
+ * Integer `n×BLOCK_UNIT` sizes + snapped origins keep layout aligned with the playfield grid.
  */
 export function createDistantWorldBackdrop(): THREE.Group {
   const root = new THREE.Group();
@@ -633,11 +632,7 @@ export function createDistantWorldBackdrop(): THREE.Group {
     if (n === 0) {
       continue;
     }
-    const material = createBackdropGridMaterial(BACKDROP_PALETTE[c], {
-      cellSize: BLOCK_UNIT,
-      lineWidth: BLOCK_UNIT * 0.055,
-      strength: 0.125,
-    });
+    const material = createBackdropLitMaterial(BACKDROP_PALETTE[c]);
     const mesh = new THREE.InstancedMesh(unitBox, material, n);
     mesh.name = `DistantBackdrop_${c}`;
     mesh.frustumCulled = false;
