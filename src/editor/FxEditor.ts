@@ -36,9 +36,11 @@ type SliderConfig = {
     | 'water.reflectivity'
     | 'water.normalStrength'
     | 'water.waveScale'
+    | 'water.waveHeight'
     | 'water.flowSpeed'
     | 'water.foamIntensity'
     | 'water.normalDistort'
+    | 'water.opacity'
     | 'lensDirt.strength'
     | 'lensDirt.minLuminance'
     | 'lensDirt.maxLuminance'
@@ -218,6 +220,14 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
         format: (value) => value.toFixed(1),
       },
       {
+        key: 'water.waveHeight',
+        label: 'Wave height (mesh swell)',
+        min: 0,
+        max: 2.5,
+        step: 0.05,
+        format: (value) => value.toFixed(2),
+      },
+      {
         key: 'water.flowSpeed',
         label: 'Flow speed',
         min: 0,
@@ -240,6 +250,14 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
         max: 0.08,
         step: 0.001,
         format: (value) => value.toFixed(3),
+      },
+      {
+        key: 'water.opacity',
+        label: 'Opacity (0–1 translucent, 1–2 denser)',
+        min: 0,
+        max: 2,
+        step: 0.02,
+        format: (value) => value.toFixed(2),
       },
     ],
   },

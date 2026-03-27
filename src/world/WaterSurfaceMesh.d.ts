@@ -20,6 +20,8 @@ export type WaterSurfaceMeshOptions = {
   foamDepthWidth?: number;
   /** Max blend toward foam white (0–1). */
   foamIntensity?: number;
+  /** 0–1: alpha; >1 (e.g. up to 2): denser tint toward water color. */
+  opacity?: number;
   flowMap?: Texture | null;
   normalMap0: Texture;
   normalMap1: Texture;

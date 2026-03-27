@@ -15,6 +15,7 @@ import { MountainBackdropProp } from './MountainBackdropProp';
 import { DistantPlanetsBackdrop } from './DistantPlanetsBackdrop';
 import { ButterflyScatterSystem } from './ButterflyScatterSystem';
 import { WaterEdgeGrassScatter } from './WaterEdgeGrassScatter';
+import { SeaFloorRocksScatter } from './SeaFloorRocksScatter';
 import { OrbitingUfoProp } from './OrbitingUfoProp';
 import { CactusEnemySystem } from './CactusEnemySystem';
 import {
@@ -120,11 +121,14 @@ export class WorldManager {
   private readonly mountainBackdrop = new MountainBackdropProp(this.worldRoot);
   private readonly distantPlanets = new DistantPlanetsBackdrop(this.worldRoot);
   private readonly terrain = new TerrainGenerator();
+  /** Terrain `createGround` root — sea bed, water, platforms (rocks parent here for correct depth order). */
+  private terrainRootGroup: THREE.Group | null = null;
   private readonly terrainPhysics = new TerrainPhysics();
   private readonly cactusEnemies: CactusEnemySystem;
   private readonly plantLoader = new GLTFLoader();
   private readonly butterflyScatter: ButterflyScatterSystem;
   private readonly waterEdgeGrass: WaterEdgeGrassScatter;
+  private readonly seaFloorRocks: SeaFloorRocksScatter;
   private readonly orbitingUfo: OrbitingUfoProp;
   private distantBackdrop: THREE.Group | null = null;
   private orbitalClouds: OrbitalCloud[] = [];
@@ -166,6 +170,7 @@ export class WorldManager {
     );
     this.butterflyScatter = new ButterflyScatterSystem(this.worldRoot, this.plantLoader);
     this.waterEdgeGrass = new WaterEdgeGrassScatter(this.worldRoot, this.plantLoader);
+    this.seaFloorRocks = new SeaFloorRocksScatter();
     this.orbitingUfo = new OrbitingUfoProp(this.worldRoot, this.plantLoader);
     this.scene.add(this.worldRoot);
 
@@ -191,7 +196,8 @@ export class WorldManager {
     this.buildSun(settings);
     this.distantBackdrop = createDistantWorldBackdrop();
     this.worldRoot.add(this.distantBackdrop);
-    this.worldRoot.add(this.terrain.createGround(waterHighFrequencyNormal, settings.water.color));
+    this.terrainRootGroup = this.terrain.createGround(waterHighFrequencyNormal, settings.water.color);
+    this.worldRoot.add(this.terrainRootGroup);
     this.fishSchools.load();
     this.fishingBoatRight.load();
     this.fishingBoatLeft.load();
@@ -585,6 +591,14 @@ export class WorldManager {
   /** Stylized grass in the water ring around platform cubes (`stylized_grass_8/stylized_grass.glb`). */
   async loadWaterEdgeGrass(): Promise<void> {
     await this.waterEdgeGrass.load();
+  }
+
+  async loadSeaFloorRocks(): Promise<void> {
+    const parent = this.terrainRootGroup;
+    if (!parent) {
+      return;
+    }
+    await this.seaFloorRocks.load(this.plantLoader, parent);
   }
 
   /** `public/assets/butterflies.glb` — scattered over platform tops (see `ButterflyScatterSystem`). */

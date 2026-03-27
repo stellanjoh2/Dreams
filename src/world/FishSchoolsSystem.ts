@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinnedHierarchy } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { WORLD_FLOOR_Y } from '../config/defaults';
+import { SEA_BED_SURFACE_Y, WATER_SURFACE_Y } from '../config/defaults';
 import { publicUrl } from '../config/publicUrl';
 
 /**
@@ -12,8 +12,14 @@ import { publicUrl } from '../config/publicUrl';
  */
 const MODEL_URL = publicUrl('assets/school_of_fish.glb');
 
-/** Below water surface (`WATER_SURFACE_Y` in defaults); tall rig bounds stay submerged. */
-const SWIM_DEPTH_Y = WORLD_FLOOR_Y - 3.92;
+/**
+ * School anchor Y: between {@link SEA_BED_SURFACE_Y} (clearance above sand) and the surface.
+ */
+const SWIM_DEPTH_Y = THREE.MathUtils.clamp(
+  SEA_BED_SURFACE_Y + 0.95,
+  SEA_BED_SURFACE_Y + 0.72,
+  WATER_SURFACE_Y - 0.88,
+);
 
 /** Target max dimension per school after normalization (meters-ish world units). */
 const TARGET_SCHOOL_EXTENT = 3.2;

@@ -97,10 +97,20 @@ export interface WaterFxSettings {
   normalStrength: number;
   /** UV scale — smaller waves / tighter ripples when higher. */
   waveScale: number;
+  /**
+   * Scales **mesh** vertex displacement (rolling swell on the water disk). 0 = flat surface.
+   * Independent from `waveScale` (normal-map ripples).
+   */
+  waveHeight: number;
   flowSpeed: number;
   foamIntensity: number;
   /** UV offset strength for reflection/refraction distortion. */
   normalDistort: number;
+  /**
+   * Water surface strength: 0–1 maps to fragment alpha; 1–2 keeps alpha 1 and pulls RGB toward
+   * water tint for a more opaque read.
+   */
+  opacity: number;
 }
 
 export interface FxSettings {

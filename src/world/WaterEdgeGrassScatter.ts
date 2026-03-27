@@ -55,6 +55,8 @@ function hasSkinnedDescendant(object: THREE.Object3D): boolean {
 function tuneGrassMaterial(material: THREE.Material): void {
   material.side = THREE.DoubleSide;
   material.depthTest = true;
+  /** Must write depth so transparent water depth-tests correctly; foam on thin blades is handled in the water shader. */
+  material.depthWrite = true;
   material.needsUpdate = true;
 }
 

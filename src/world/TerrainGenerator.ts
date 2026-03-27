@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { WaterSurfaceMesh } from './WaterSurfaceMesh.js';
 import { BLOCK_UNIT, JUMP_PADS, MOVING_ELEVATORS, PLATFORM_TILES, getMovingElevatorTopY } from './TerrainLayout';
-import { WATER_SURFACE_Y, WORLD_FLOOR_Y } from '../config/defaults';
+import { SEA_BED_SURFACE_Y, WATER_SURFACE_Y } from '../config/defaults';
+import { publicUrl } from '../config/publicUrl';
 import type { WaterFxSettings } from '../fx/FxSettings';
 import { createMetallicFlakeOrmTexture } from '../materials/MetallicFlakeDetail';
 import { getSeaBedRadiusWorld, getWaterSurfaceRadiusWorld } from './worldHorizon';
@@ -16,23 +17,95 @@ const WATER_DISK_PHI = 52;
 /** Avoid a visible hole at origin; ~1 mm in world units. */
 const WATER_DISK_INNER_EPS = 0.001;
 
-/** Ambient swell (local Z before mesh rotation → world vertical). */
-const WATER_SWELL_AMP = 0.18;
-const WATER_SWELL_AMP2 = 0.104;
-const WATER_SWELL_AMP3 = 0.068;
+/**
+ * Multi-component Gerstner (trochoidal) displacement on the water disk.
+ * Resting grid (local X,Y in ring plane; displacement along local Z → world up after mesh Rx(-π/2)).
+ * See [trochoidal / Gerstner waves](https://en.wikipedia.org/wiki/Trochoidal_wave); CG multi-wave variant
+ * as in Tessendorf / common ocean shaders (cf. augmented Gerstner stacks in real-time water).
+ */
+const GRAVITY = 9.81;
 
-function waterSwellHeight(localX: number, localY: number, t: number): number {
-  const wx = localX;
-  const wz = localY;
-  return (
-    WATER_SWELL_AMP *
-      Math.sin(wx * 0.062 + t * 0.52) *
-      Math.cos(wz * 0.055 - t * 0.45) +
-    WATER_SWELL_AMP2 * Math.sin((wx + wz) * 0.034 + t * 0.34) +
-    WATER_SWELL_AMP3 *
-      (Math.sin(wx * 0.018 - wz * 0.016 + t * 0.24) +
-        Math.cos(wx * 0.011 + wz * 0.021 - t * 0.2))
-  );
+type GerstnerWaveParams = {
+  /** Horizontal direction (need not be unit — normalized internally). */
+  dirX: number;
+  dirY: number;
+  /** Spatial period (meters). */
+  wavelength: number;
+  /** Vertical amplitude (meters). */
+  amplitude: number;
+  /** 0 = pure sine in Z only; toward 1 = stronger horizontal orbital motion (sharper crests). */
+  steepness: number;
+  /** Constant phase offset (radians). */
+  phase: number;
+  /** Multiplier on √(gk) angular frequency (1 ≈ deep-water dispersion). */
+  speedScale: number;
+};
+
+const WATER_GERSTNER_WAVES: readonly GerstnerWaveParams[] = [
+  {
+    dirX: 1,
+    dirY: 0.38,
+    wavelength: 52,
+    amplitude: 0.1,
+    steepness: 0.62,
+    phase: 0.35,
+    speedScale: 0.92,
+  },
+  {
+    dirX: -0.55,
+    dirY: 1,
+    wavelength: 38,
+    amplitude: 0.078,
+    steepness: 0.58,
+    phase: 2.05,
+    speedScale: 1.02,
+  },
+  {
+    dirX: 0.72,
+    dirY: -0.68,
+    wavelength: 29,
+    amplitude: 0.055,
+    steepness: 0.52,
+    phase: 4.2,
+    speedScale: 0.88,
+  },
+  {
+    dirX: 0.22,
+    dirY: 1,
+    wavelength: 67,
+    amplitude: 0.062,
+    steepness: 0.48,
+    phase: 1.45,
+    speedScale: 0.75,
+  },
+];
+
+function gerstnerDisplacement(
+  restX: number,
+  restY: number,
+  t: number,
+  heightMul: number,
+): { dx: number; dy: number; dz: number } {
+  let dx = 0;
+  let dy = 0;
+  let dz = 0;
+
+  for (const w of WATER_GERSTNER_WAVES) {
+    const len = Math.hypot(w.dirX, w.dirY);
+    const Dx = len > 1e-6 ? w.dirX / len : 1;
+    const Dy = len > 1e-6 ? w.dirY / len : 0;
+    const k = (Math.PI * 2) / Math.max(w.wavelength, 0.5);
+    const omega = Math.sqrt(GRAVITY * k) * w.speedScale;
+    const phase = k * (Dx * restX + Dy * restY) - omega * t + w.phase;
+    const s = Math.sin(phase);
+    const c = Math.cos(phase);
+    const horiz = w.steepness * w.amplitude * c;
+    dx += horiz * Dx;
+    dy += horiz * Dy;
+    dz += w.amplitude * s;
+  }
+
+  return { dx: dx * heightMul, dy: dy * heightMul, dz: dz * heightMul };
 }
 
 const createWaterNormalTexture = (phase: number): THREE.DataTexture => {
@@ -70,6 +143,58 @@ const createWaterNormalTexture = (phase: number): THREE.DataTexture => {
   return texture;
 };
 
+/** Planar UVs on horizontal disk (geometry in XY before mesh Rx(-π/2)). */
+function applyPlanarSandUVs(geometry: THREE.BufferGeometry, metersPerRepeat: number): void {
+  const pos = geometry.attributes.position;
+  const uv = geometry.attributes.uv;
+  for (let i = 0; i < pos.count; i += 1) {
+    uv.setXY(i, pos.getX(i) / metersPerRepeat, pos.getY(i) / metersPerRepeat);
+  }
+  uv.needsUpdate = true;
+}
+
+const SAND_TILE_METERS = 7.5;
+
+/**
+ * Mix sand albedo toward luminance so refracted/seen-through water stays easier to tint.
+ * `1` = fully grayscale; `0.75` ≈ strong desat (default); `0` = raw texture.
+ */
+const SAND_TEXTURE_DESATURATION = 0.75;
+
+function desaturateTexture(tex: THREE.Texture, amount: number): void {
+  if (amount <= 0) {
+    return;
+  }
+  const img = tex.image as HTMLImageElement | HTMLCanvasElement;
+  const w = img.width;
+  const h = img.height;
+  if (!w || !h) {
+    return;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) {
+    return;
+  }
+  ctx.drawImage(img, 0, 0);
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const d = imageData.data;
+  const a = THREE.MathUtils.clamp(amount, 0, 1);
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i]!;
+    const g = d[i + 1]!;
+    const b = d[i + 2]!;
+    const y = 0.299 * r + 0.587 * g + 0.114 * b;
+    d[i] = r + (y - r) * a;
+    d[i + 1] = g + (y - g) * a;
+    d[i + 2] = b + (y - b) * a;
+  }
+  ctx.putImageData(imageData, 0, 0);
+  tex.image = canvas;
+}
+
 export class TerrainGenerator {
   private readonly seaBedGeometry: THREE.CircleGeometry;
   private readonly waterGeometry: THREE.RingGeometry;
@@ -81,6 +206,8 @@ export class TerrainGenerator {
   private readonly instanceDummy = new THREE.Object3D();
   private waterSurface: WaterSurfaceMesh | null = null;
   private waterBasePositions: Float32Array | null = null;
+  /** From `WaterFxSettings.waveHeight` — scales mesh swell each frame. */
+  private waterMeshWaveHeight = 1;
 
   constructor() {
     const rWater = getWaterSurfaceRadiusWorld();
@@ -99,21 +226,40 @@ export class TerrainGenerator {
     const group = new THREE.Group();
     this.elevatorMeshes.clear();
 
-    const seaBed = new THREE.Mesh(
-      this.seaBedGeometry,
-      new THREE.MeshPhysicalMaterial({
-        color: new THREE.Color('#0d7c87'),
-        roughness: 0.52,
-        metalness: 0.06,
-        clearcoat: 0.18,
-        transparent: true,
-        opacity: 0.9,
-      }),
-    );
+    const seaBedGeometry = this.seaBedGeometry.clone();
+    applyPlanarSandUVs(seaBedGeometry, SAND_TILE_METERS);
+
+    const seaBedMaterial = new THREE.MeshStandardMaterial({
+      /** Near-neutral multiply — sand detail comes from (desaturated) map. */
+      color: new THREE.Color('#eae8e5'),
+      roughness: 0.91,
+      metalness: 0.02,
+    });
+    const seaBed = new THREE.Mesh(seaBedGeometry, seaBedMaterial);
+    seaBed.name = 'SeaBed';
     seaBed.rotation.x = -Math.PI / 2;
-    seaBed.position.set(0, WORLD_FLOOR_Y - 1.25, 0);
+    seaBed.position.set(0, SEA_BED_SURFACE_Y, 0);
     seaBed.receiveShadow = true;
+    seaBed.castShadow = false;
     group.add(seaBed);
+
+    new THREE.TextureLoader().load(
+      publicUrl('assets/alfie-jaarf-sandtexture4.jpg'),
+      (tex) => {
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = 4;
+        desaturateTexture(tex, SAND_TEXTURE_DESATURATION);
+        tex.needsUpdate = true;
+        seaBedMaterial.map = tex;
+        seaBedMaterial.needsUpdate = true;
+      },
+      undefined,
+      () => {
+        console.warn('[TerrainGenerator] Sand texture missing — flat tint only');
+      },
+    );
 
     const foamOpts = {
       /** Tight rim at geometry/water cut; raise slightly if foam disappears. */
@@ -245,6 +391,9 @@ export class TerrainGenerator {
       return;
     }
 
+    const wh = Number(settings.waveHeight);
+    this.waterMeshWaveHeight = Number.isFinite(wh) ? THREE.MathUtils.clamp(wh, 0, 4) : 1;
+
     type WaterUniformNode = {
       color: { value: THREE.Color };
       reflectivity: { value: number };
@@ -255,6 +404,7 @@ export class TerrainGenerator {
       flowSpeed: { value: number };
       foamIntensity: { value: number };
       normalDistort: { value: number };
+      opacity: { value: number };
     };
 
     const node = (water.material as { colorNode?: WaterUniformNode }).colorNode;
@@ -271,6 +421,10 @@ export class TerrainGenerator {
     node.flowSpeed.value = settings.flowSpeed;
     node.foamIntensity.value = settings.foamIntensity;
     node.normalDistort.value = settings.normalDistort;
+    if (node.opacity) {
+      const o = Number(settings.opacity);
+      node.opacity.value = Number.isFinite(o) ? THREE.MathUtils.clamp(o, 0, 2) : 1;
+    }
   }
 
   update(elapsed: number): void {
@@ -286,7 +440,10 @@ export class TerrainGenerator {
     this.updateWaterSwell(elapsed);
   }
 
-  /** Very soft rolling swell on the water disk (mesh Z in local space → world up after Rx(-π/2)). */
+  /**
+   * Gerstner swell on the water disk (rest X,Y → displaced X,Y,Z in local space;
+   * local Z → world up after Rx(-π/2)).
+   */
   private updateWaterSwell(elapsed: number): void {
     const mesh = this.waterSurface;
     const base = this.waterBasePositions;
@@ -298,15 +455,16 @@ export class TerrainGenerator {
     const posAttr = geo.attributes.position;
     const arr = posAttr.array as Float32Array;
     const n = base.length;
+    const hm = this.waterMeshWaveHeight;
 
     for (let i = 0; i < n; i += 3) {
-      const x = base[i]!;
-      const y = base[i + 1]!;
+      const x0 = base[i]!;
+      const y0 = base[i + 1]!;
       const z0 = base[i + 2]!;
-      const h = waterSwellHeight(x, y, elapsed);
-      arr[i] = x;
-      arr[i + 1] = y;
-      arr[i + 2] = z0 + h;
+      const { dx, dy, dz } = gerstnerDisplacement(x0, y0, elapsed, hm);
+      arr[i] = x0 + dx;
+      arr[i + 1] = y0 + dy;
+      arr[i + 2] = z0 + dz;
     }
 
     posAttr.needsUpdate = true;

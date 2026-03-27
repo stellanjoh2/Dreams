@@ -13,7 +13,8 @@
     "trees:list": "node scripts/extract-curated-trees.mjs --list",
     "gltf:list-animations": "node scripts/list-glb-animations.mjs",
     "planets:fbx2glb": "node scripts/convert-planet-fbx.mjs",
-    "planets:extract-unity-textures": "node scripts/extract-lowpoly-planets-unity-textures.mjs"
+    "planets:extract-unity-textures": "node scripts/extract-lowpoly-planets-unity-textures.mjs",
+    "rocks:obj2glb": "node scripts/convert-rocks-obj.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.183.1",

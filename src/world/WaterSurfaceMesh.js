@@ -91,6 +91,8 @@ class WaterSurfaceNode extends TempNode {
     /** Procedural normals used a custom RGB packing; tiling PNGs are standard tangent-space. */
     this._STANDARD_NORMAL_UNPACK = options.standardNormalUnpack === true;
     this.normalDistort = uniform(options.normalDistort !== undefined ? options.normalDistort : 0.034);
+    /** Output alpha for {@link NodeMaterial} transparent blend (0 = invisible, 1 = opaque tint). */
+    this.opacity = uniform(options.opacity !== undefined ? options.opacity : 1);
   }
 
   updateFlow(delta) {
@@ -193,12 +195,23 @@ class WaterSurfaceNode extends TempNode {
       const waterLin = linearDepth();
       const sceneUV = viewportSafeUV(refractorUV);
       const sceneLin = linearDepth(viewportDepthTexture(sceneUV));
+      /** Neighbor depth spread: high where refracted samples jump (thin grass, hairline gaps); low on flat seabed or big faces. */
+      const depthTapPx = float(0.002);
+      const sceneLinU = linearDepth(
+        viewportDepthTexture(viewportSafeUV(refractorUV.add(vec2(depthTapPx, 0)))),
+      );
+      const sceneLinV = linearDepth(
+        viewportDepthTexture(viewportSafeUV(refractorUV.add(vec2(0, depthTapPx)))),
+      );
+      const depthSpread = max(abs(sceneLin.sub(sceneLinU)), abs(sceneLin.sub(sceneLinV)));
+      const thinGeomFoamMul = float(1).sub(smoothstep(float(0.00035), float(0.0028), depthSpread).mul(0.82));
+
       const depthDiff = abs(waterLin.sub(sceneLin));
       const inner = float(0);
       const foamByDepth = float(1).sub(smoothstep(inner, this.foamDepthWidth, depthDiff));
       const foamTight = pow(foamByDepth, float(2.1));
       const behindScene = step(waterLin.add(float(0.00012)), sceneLin);
-      const foamMask = foamTight.mul(behindScene);
+      const foamMask = foamTight.mul(behindScene).mul(thinGeomFoamMul);
 
       const wxz = positionWorld.xz;
       const chop = sin(wxz.x.mul(1.85).add(wxz.y.mul(1.42)).add(this.foamTime.mul(0.95)))
@@ -213,7 +226,14 @@ class WaterSurfaceNode extends TempNode {
       const foamTint = vec3(1.0, 0.985, 0.96);
       const outRgb = mix(lit.rgb, foamTint, foamAmt);
 
-      return vec4(outRgb, lit.a);
+      /** 0–1: alpha only; >1 (up to 2): alpha stays 1 and RGB pulls toward water tint (less see-through). */
+      const op = this.opacity;
+      const alphaOut = min(op, float(1.0));
+      const over = max(op.sub(float(1.0)), float(0.0));
+      const densityMix = min(over, float(1.0)).mul(float(0.82));
+      const outDense = mix(outRgb, this.color.rgb, densityMix);
+
+      return vec4(outDense, alphaOut);
     })();
 
     return outputNode;
