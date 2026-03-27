@@ -238,6 +238,11 @@ export class LensFlareOverlay {
     this.intensity = Math.max(0, value);
   }
 
+  /** Damped 0–1 sun flare strength (on-screen sun, not occluded) — drives post-process lens dirt boost. */
+  getSunFlareVisibility(): number {
+    return this.visibility;
+  }
+
   setOcclusionObjects(objects: THREE.Object3D[] | null): void {
     this.occlusionObjects = objects && objects.length > 0 ? objects : null;
   }

@@ -12,8 +12,11 @@ import {
   normalView,
   output,
   pass,
+  pow,
   saturation,
+  screenUV,
   smoothstep,
+  texture,
   uniform,
   uv,
   vec2,
@@ -21,7 +24,21 @@ import {
   vec4,
   velocity,
 } from 'three/tsl';
-import type { FxSettings } from './FxSettings';
+import { publicUrl } from '../config/publicUrl';
+import type { FxSettings, LensDirtSettings } from './FxSettings';
+
+function makePlaceholderDirtTexture(): THREE.Texture {
+  const data = new Uint8Array([0, 0, 0, 255]);
+  const tex = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
 
 export class PostProcessingPipeline {
   private renderPipeline!: RenderPipeline;
@@ -40,9 +57,24 @@ export class PostProcessingPipeline {
   private readonly motionBlurIntensityNode;
   private readonly crystalPickupPulseNode;
 
+  /** Orby-style lens dirt (meshgl `LensDirtShader` — additive dust, smoothstep × pow × strength). */
+  private lensDirtGpuTexture: THREE.Texture = makePlaceholderDirtTexture();
+  private readonly lensDirtStrengthNode;
+  private readonly lensDirtMinLumNode;
+  private readonly lensDirtMaxLumNode;
+  private readonly lensDirtSensitivityNode;
+  private readonly lensDirtExposureNode;
+  private readonly lensDirtActiveNode;
+  /** 0–1 from sun lens-flare visibility — stronger dirt when staring at the sun (Orby-like). */
+  private readonly lensDirtSunBoostNode;
+
   private motionBlurEnabled: boolean;
   /** Avoid `renderPipeline.needsUpdate` when unrelated FX (e.g. water tint) changes — full graph refresh is costly. */
   private lastPostFxUniformKey: string | null = null;
+  private lensDirtTextureLoaded = false;
+  private lastLensDirtSettings: LensDirtSettings;
+  /** Live settings reference for async lens-dirt load → pipeline rebuild. */
+  private latestFxSettings: FxSettings;
 
   constructor(
     renderer: WebGPURenderer,
@@ -59,9 +91,58 @@ export class PostProcessingPipeline {
     this.motionBlurIntensityNode = uniform(settings.motionBlur.intensity);
     this.crystalPickupPulseNode = uniform(0);
     this.motionBlurEnabled = settings.motionBlur.enabled;
+    this.latestFxSettings = settings;
+
+    this.lastLensDirtSettings = settings.lensDirt;
+    this.lensDirtStrengthNode = uniform(settings.lensDirt.strength);
+    this.lensDirtMinLumNode = uniform(settings.lensDirt.minLuminance);
+    this.lensDirtMaxLumNode = uniform(settings.lensDirt.maxLuminance);
+    this.lensDirtSensitivityNode = uniform(settings.lensDirt.sensitivity);
+    this.lensDirtExposureNode = uniform(1);
+    this.lensDirtActiveNode = uniform(0);
+    this.lensDirtSunBoostNode = uniform(0);
 
     this.rebuildPipeline(settings);
     this.applySettings(settings);
+    void this.loadLensDirtTexture(publicUrl('textures/lens-dirt.jpg'));
+  }
+
+  private loadLensDirtTexture(url: string): void {
+    new THREE.TextureLoader().load(
+      url,
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.wrapS = THREE.ClampToEdgeWrapping;
+        tex.wrapT = THREE.ClampToEdgeWrapping;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = true;
+        tex.needsUpdate = true;
+
+        this.lensDirtGpuTexture.dispose();
+        this.lensDirtGpuTexture = tex;
+        this.lensDirtTextureLoaded = true;
+
+        const w = this.renderer.domElement.width;
+        const h = this.renderer.domElement.height;
+        this.rebuildPipeline(this.latestFxSettings);
+        this.lastPostFxUniformKey = null;
+        if (w > 0 && h > 0) {
+          this.resize(w, h);
+        }
+        this.applySettings(this.latestFxSettings);
+        this.renderPipeline.needsUpdate = true;
+      },
+      undefined,
+      () => {
+        console.warn('[PostProcessing] Could not load textures/lens-dirt.jpg — lens dirt disabled');
+      },
+    );
+  }
+
+  private syncLensDirtActiveFlag(): void {
+    const s = this.lastLensDirtSettings;
+    this.lensDirtActiveNode.value = s.enabled && this.lensDirtTextureLoaded ? 1 : 0;
   }
 
   private rebuildPipeline(settings: FxSettings): void {
@@ -129,13 +210,35 @@ export class PostProcessingPipeline {
     const saturatedBoosted = mul(saturatedColor.add(pickBoost).mul(chromaKick), brightLift);
     const vignetteUv = uv().sub(vec2(0.5, 0.5)).mul(1.8);
     const vignetteMask = smoothstep(0.14, 1.05, vignetteUv.dot(vignetteUv)).mul(this.vignetteNode);
-    const finalColor = mix(saturatedBoosted, saturatedBoosted.mul(0.68), vignetteMask);
+    const afterVignette = mix(saturatedBoosted, saturatedBoosted.mul(0.68), vignetteMask);
 
-    this.renderPipeline = new RenderPipeline(this.renderer, vec4(finalColor, 1));
+    /** Only compile dirt sampling after the JPG loads — sampling a 1×1 placeholder broke WebGPU output (black). */
+    const finalRgb = this.lensDirtTextureLoaded
+      ? (() => {
+          const dirtSample = texture(this.lensDirtGpuTexture).sample(screenUV.flipY());
+          const ramp = smoothstep(this.lensDirtMinLumNode, this.lensDirtMaxLumNode, this.lensDirtExposureNode);
+          /**
+           * Goal: screen-space plate, **additive only** (no multiply — that darkened the whole frame).
+           * `lensDirtSunBoost` is ~0 when not facing the sun / bright spot; pow() keeps it **mostly off** until boost is high.
+           */
+          const sunGate = pow(this.lensDirtSunBoostNode, float(2.85));
+          const amount = pow(ramp.add(float(1e-4)), this.lensDirtSensitivityNode)
+            .mul(this.lensDirtStrengthNode)
+            .mul(this.lensDirtActiveNode)
+            .mul(sunGate);
+          /** Slight lift so mid-gray specks read a bit on bright bloom (still additive, no darken). */
+          const dirtRgb = dirtSample.xyz.mul(float(2.1));
+          return afterVignette.add(dirtRgb.mul(amount));
+        })()
+      : afterVignette;
+
+    this.renderPipeline = new RenderPipeline(this.renderer, vec4(finalRgb, 1));
     this.motionBlurEnabled = settings.motionBlur.enabled;
   }
 
   applySettings(settings: FxSettings): void {
+    this.latestFxSettings = settings;
+
     const motionBlurToggled = settings.motionBlur.enabled !== this.motionBlurEnabled;
     if (motionBlurToggled) {
       this.rebuildPipeline(settings);
@@ -157,6 +260,15 @@ export class PostProcessingPipeline {
     this.saturationNode.value = settings.saturation;
     this.vignetteNode.value = settings.vignette;
     this.motionBlurIntensityNode.value = settings.motionBlur.intensity;
+
+    this.lastLensDirtSettings = settings.lensDirt;
+    this.lensDirtStrengthNode.value = settings.lensDirt.strength;
+    this.lensDirtMinLumNode.value = settings.lensDirt.minLuminance;
+    this.lensDirtMaxLumNode.value = settings.lensDirt.maxLuminance;
+    this.lensDirtSensitivityNode.value = Math.max(0.001, settings.lensDirt.sensitivity);
+    /** Maps tone exposure into Orby’s `exposureFactor` slot (no auto-exposure luminance yet). */
+    this.lensDirtExposureNode.value = THREE.MathUtils.clamp(settings.exposure / 1.25, 0.25, 1.05);
+    this.syncLensDirtActiveFlag();
 
     const uniformKey = [
       settings.exposure,
@@ -181,17 +293,24 @@ export class PostProcessingPipeline {
     this.crystalPickupPulseNode.value = THREE.MathUtils.clamp(strength, 0, 1);
   }
 
+  /**
+   * 0 = not facing bright sky / sun; 1 = full screen-space dirt strength.
+   * App feeds max(DOM sun flare visibility, camera→sun alignment³).
+   */
+  setLensDirtSunBoost(visibility01: number): void {
+    this.lensDirtSunBoostNode.value = THREE.MathUtils.clamp(visibility01, 0, 1);
+  }
+
   render(): void {
     this.renderPipeline.render();
   }
 
   resize(width: number, height: number): void {
     this.scenePass?.setSize?.(width, height);
-    this.aoNode?.setSize?.(width, height);
-    this.bloomNode?.setSize?.(width, height);
   }
 
   dispose(): void {
     this.renderPipeline.dispose();
+    this.lensDirtGpuTexture.dispose();
   }
 }

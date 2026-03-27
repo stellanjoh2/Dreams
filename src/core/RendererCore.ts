@@ -38,7 +38,6 @@ export class RendererCore {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
     this.resize();
 
@@ -74,10 +73,7 @@ export class RendererCore {
       this.height = height;
       this.pixelRatio = pixelRatio;
 
-      this.renderer.setPixelRatio(pixelRatio);
-      this.renderer.setSize(width, height, false);
-      this.canvas.width = Math.max(1, Math.round(width * pixelRatio));
-      this.canvas.height = Math.max(1, Math.round(height * pixelRatio));
+      this.renderer.setDrawingBufferSize(width, height, pixelRatio);
     }
 
     this.renderer.setViewport(0, 0, width, height);

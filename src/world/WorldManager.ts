@@ -76,6 +76,17 @@ export class WorldManager {
   private static readonly ENVIRONMENT_MAP_URL = publicUrl('hdri/MR_EXT-010_BlueEndDayPinkClouds_Moorea_4k.png');
   /** Visual scale for `buildSun` (pulse multiplies this each frame). */
   private static readonly SUN_MESH_BASE_SCALE = 1.24;
+  /** World-space radius of the sun sphere (only geometry; halo comes from bloom). */
+  private static readonly SUN_CORE_RADIUS = 34;
+
+  /** Cool / neutral / warm for `sunTemperature` 0 → 0.5 → 1 (piecewise lerp). */
+  private static readonly SUN_TEMP_LIGHT_COOL = /* @__PURE__ */ new THREE.Color('#8ec8ff');
+  private static readonly SUN_TEMP_LIGHT_NEUTRAL = /* @__PURE__ */ new THREE.Color('#ffb060');
+  private static readonly SUN_TEMP_LIGHT_WARM = /* @__PURE__ */ new THREE.Color('#ff5a18');
+  private static readonly SUN_TEMP_HDR_COOL = /* @__PURE__ */ new THREE.Vector3(2.35, 2.95, 3.55);
+  private static readonly SUN_TEMP_HDR_NEUTRAL = /* @__PURE__ */ new THREE.Vector3(3.4, 3.15, 2.95);
+  private static readonly SUN_TEMP_HDR_WARM = /* @__PURE__ */ new THREE.Vector3(3.75, 2.65, 2.05);
+  private static readonly sunTempHdrScratch = new THREE.Vector3();
   /**
    * Hint XZ (world) for which compass sector the sun sits in; anchor length is recomputed from backdrop
    * metrics so the disk sits **past** the mountain ring.
@@ -121,8 +132,8 @@ export class WorldManager {
   private readonly sunTargetPosition = new THREE.Vector3(0, 4, -10);
 
   private sunGroup?: THREE.Group;
-  /** Single camera-facing disc: radial gradient (no separate core vs halo). */
-  private sunSprite?: THREE.Sprite;
+  /** Single bright sphere — no billboard layer (avoids donut / inner dark disc). */
+  private sunCore?: THREE.Mesh;
   private skyDome?: THREE.Mesh;
   private ambientLight?: THREE.AmbientLight;
   private hemiLight?: THREE.HemisphereLight;
@@ -176,7 +187,7 @@ export class WorldManager {
     this.buildSkyDome();
     this.updateSunAnchorFromBackdrop();
     this.buildLights(settings);
-    this.buildSun();
+    this.buildSun(settings);
     this.distantBackdrop = createDistantWorldBackdrop();
     this.worldRoot.add(this.distantBackdrop);
     this.worldRoot.add(this.terrain.createGround(waterHighFrequencyNormal, settings.water.color));
@@ -292,13 +303,13 @@ export class WorldManager {
       this.hemiLight.intensity = settings.atmosphere.hemiIntensity;
     }
 
-    if (this.sunSprite?.material instanceof THREE.SpriteMaterial) {
-      this.sunSprite.material.color.set('#ffd0a0');
+    if (this.sunCore?.material instanceof THREE.MeshBasicMaterial) {
+      WorldManager.applySunCoreHdrColor(this.sunCore.material, settings.atmosphere.sunTemperature);
     }
 
     if (this.sunLight) {
       this.sunLight.intensity = 3.45 * settings.atmosphere.sunGlow;
-      this.sunLight.color.set('#ffb060');
+      WorldManager.sunTemperatureToLightColor(settings.atmosphere.sunTemperature, this.sunLight.color);
     }
 
     this.ambientDust.applySettings(settings.particles);
@@ -334,11 +345,11 @@ export class WorldManager {
   }
 
   getSunWorldPosition(target = new THREE.Vector3()): THREE.Vector3 {
-    if (!this.sunSprite) {
+    if (!this.sunGroup) {
       return target.set(0, 26, -90);
     }
 
-    this.sunSprite.getWorldPosition(this.sunWorldPosition);
+    this.sunGroup.getWorldPosition(this.sunWorldPosition);
     return target.copy(this.sunWorldPosition);
   }
 
@@ -389,7 +400,11 @@ export class WorldManager {
     );
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#ffb060', 3.45 * settings.atmosphere.sunGlow);
+    const sunCol = WorldManager.sunTemperatureToLightColor(
+      settings.atmosphere.sunTemperature,
+      new THREE.Color(),
+    );
+    this.sunLight = new THREE.DirectionalLight(sunCol, 3.45 * settings.atmosphere.sunGlow);
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.set(1536, 1536);
     this.sunLight.shadow.bias = -0.00008;
@@ -413,54 +428,50 @@ export class WorldManager {
     this.scene.add(this.coolLight);
   }
 
-  private buildSun(): void {
-    const blobTex = WorldManager.createSunBlobTexture();
-    const mat = new THREE.SpriteMaterial({
-      map: blobTex,
-      color: new THREE.Color('#ffd0a0'),
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      depthTest: false,
+  /**
+   * Directional sun / lens-flare tint: 0 = cool blue-white, 0.5 = legacy default, 1 = warm orange.
+   */
+  static sunTemperatureToLightColor(temperature01: number, target: THREE.Color): THREE.Color {
+    const u = THREE.MathUtils.clamp(temperature01, 0, 1);
+    const cold = WorldManager.SUN_TEMP_LIGHT_COOL;
+    const neutral = WorldManager.SUN_TEMP_LIGHT_NEUTRAL;
+    const warm = WorldManager.SUN_TEMP_LIGHT_WARM;
+    if (u <= 0.5) {
+      return target.copy(cold).lerp(neutral, u * 2);
+    }
+    return target.copy(neutral).lerp(warm, (u - 0.5) * 2);
+  }
+
+  private static applySunCoreHdrColor(material: THREE.MeshBasicMaterial, temperature01: number): void {
+    const u = THREE.MathUtils.clamp(temperature01, 0, 1);
+    const cold = WorldManager.SUN_TEMP_HDR_COOL;
+    const neutral = WorldManager.SUN_TEMP_HDR_NEUTRAL;
+    const warm = WorldManager.SUN_TEMP_HDR_WARM;
+    const v = WorldManager.sunTempHdrScratch;
+    if (u <= 0.5) {
+      v.copy(cold).lerp(neutral, u * 2);
+    } else {
+      v.copy(neutral).lerp(warm, (u - 0.5) * 2);
+    }
+    material.color.setRGB(v.x, v.y, v.z);
+  }
+
+  private buildSun(settings: FxSettings): void {
+    const coreGeo = new THREE.SphereGeometry(WorldManager.SUN_CORE_RADIUS, 48, 32);
+    const coreMat = new THREE.MeshBasicMaterial({
+      fog: false,
       toneMapped: false,
+      depthTest: true,
+      depthWrite: true,
     });
-    this.sunSprite = new THREE.Sprite(mat);
-    this.sunSprite.center.set(0.5, 0.5);
-    this.sunSprite.scale.set(132, 132, 1);
-    this.sunSprite.renderOrder = 50;
+    WorldManager.applySunCoreHdrColor(coreMat, settings.atmosphere.sunTemperature);
+    this.sunCore = new THREE.Mesh(coreGeo, coreMat);
 
     this.sunGroup = new THREE.Group();
-    this.sunGroup.add(this.sunSprite);
+    this.sunGroup.add(this.sunCore);
     this.sunGroup.position.copy(this.sunAnchor);
     this.sunGroup.scale.setScalar(WorldManager.SUN_MESH_BASE_SCALE);
     this.scene.add(this.sunGroup);
-  }
-
-  /** One smooth radial falloff: bright opaque core → soft edge (no “donut” or second disk). */
-  private static createSunBlobTexture(): THREE.CanvasTexture {
-    const s = 256;
-    const canvas = document.createElement('canvas');
-    canvas.width = s;
-    canvas.height = s;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      return new THREE.CanvasTexture(canvas);
-    }
-    const c = s / 2;
-    const g = ctx.createRadialGradient(c, c, 0, c, c, c);
-    g.addColorStop(0, 'rgba(255, 252, 245, 1)');
-    g.addColorStop(0.05, 'rgba(255, 248, 228, 1)');
-    g.addColorStop(0.14, 'rgba(255, 238, 205, 0.96)');
-    g.addColorStop(0.28, 'rgba(255, 224, 175, 0.8)');
-    g.addColorStop(0.46, 'rgba(255, 205, 145, 0.52)');
-    g.addColorStop(0.66, 'rgba(255, 185, 115, 0.26)');
-    g.addColorStop(0.86, 'rgba(255, 165, 95, 0.08)');
-    g.addColorStop(1, 'rgba(255, 150, 80, 0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, s, s);
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
   }
 
   /**

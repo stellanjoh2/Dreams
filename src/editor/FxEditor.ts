@@ -18,6 +18,7 @@ type SliderConfig = {
     | 'atmosphere.ambientIntensity'
     | 'atmosphere.hemiIntensity'
     | 'atmosphere.sunGlow'
+    | 'atmosphere.sunTemperature'
     | 'fresnel.strength'
     | 'fresnel.radius'
     | 'movement.walkSpeed'
@@ -37,7 +38,11 @@ type SliderConfig = {
     | 'water.waveScale'
     | 'water.flowSpeed'
     | 'water.foamIntensity'
-    | 'water.normalDistort';
+    | 'water.normalDistort'
+    | 'lensDirt.strength'
+    | 'lensDirt.minLuminance'
+    | 'lensDirt.maxLuminance'
+    | 'lensDirt.sensitivity';
   label: string;
   min: number;
   max: number;
@@ -90,6 +95,43 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
     ],
   },
   {
+    title: 'Lens dirt',
+    fields: [
+      {
+        key: 'lensDirt.strength',
+        label: 'Strength',
+        min: 0,
+        max: 2,
+        step: 0.02,
+        format: (value) => value.toFixed(2),
+      },
+      {
+        key: 'lensDirt.minLuminance',
+        label: 'Ramp min (exposure factor)',
+        min: 0,
+        max: 1,
+        step: 0.01,
+        format: (value) => value.toFixed(2),
+      },
+      {
+        key: 'lensDirt.maxLuminance',
+        label: 'Ramp max',
+        min: 0,
+        max: 1,
+        step: 0.01,
+        format: (value) => value.toFixed(2),
+      },
+      {
+        key: 'lensDirt.sensitivity',
+        label: 'Pow (curve)',
+        min: 0.05,
+        max: 3,
+        step: 0.02,
+        format: (value) => value.toFixed(2),
+      },
+    ],
+  },
+  {
     title: 'Atmosphere',
     fields: [
       {
@@ -115,6 +157,14 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
         step: 0.01,
       },
       { key: 'atmosphere.sunGlow', label: 'Sun Glow', min: 0.2, max: 2.5, step: 0.01 },
+      {
+        key: 'atmosphere.sunTemperature',
+        label: 'Sun temperature (cool → warm)',
+        min: 0,
+        max: 1,
+        step: 0.01,
+        format: (value) => value.toFixed(2),
+      },
     ],
   },
   {
@@ -290,6 +340,7 @@ export class FxEditor {
   private readonly inputs = new Map<string, HTMLInputElement>();
   private readonly values = new Map<string, HTMLSpanElement>();
   private readonly motionBlurEnabledInput: HTMLInputElement;
+  private readonly lensDirtEnabledInput: HTMLInputElement;
   private readonly fresnelColorInput: HTMLInputElement;
   private readonly fogColorInput: HTMLInputElement;
   private readonly particleColorInput: HTMLInputElement;
@@ -342,7 +393,22 @@ export class FxEditor {
       this.onChange(this.settings);
     });
     motionToggle.append(motionLabel, this.motionBlurEnabledInput);
-    perfSection.append(perfTitle, motionToggle);
+
+    const lensDirtToggle = document.createElement('label');
+    lensDirtToggle.className = 'editor-field';
+    const lensDirtLabel = document.createElement('span');
+    lensDirtLabel.className = 'editor-label';
+    lensDirtLabel.textContent = 'Lens dirt (screen dust, Orby-style)';
+    this.lensDirtEnabledInput = document.createElement('input');
+    this.lensDirtEnabledInput.type = 'checkbox';
+    this.lensDirtEnabledInput.checked = this.settings.lensDirt.enabled;
+    this.lensDirtEnabledInput.addEventListener('change', () => {
+      this.settings.lensDirt.enabled = this.lensDirtEnabledInput.checked;
+      this.onChange(this.settings);
+    });
+    lensDirtToggle.append(lensDirtLabel, this.lensDirtEnabledInput);
+
+    perfSection.append(perfTitle, motionToggle, lensDirtToggle);
     grid.append(perfSection);
 
     sliderGroups.forEach((group) => {
@@ -516,6 +582,7 @@ export class FxEditor {
 
   sync(): void {
     this.motionBlurEnabledInput.checked = this.settings.motionBlur.enabled;
+    this.lensDirtEnabledInput.checked = this.settings.lensDirt.enabled;
 
     sliderGroups.flatMap((group) => group.fields).forEach((field) => {
       const value = this.getValue(field.key);

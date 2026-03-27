@@ -11,6 +11,11 @@ export interface AtmosphereSettings {
   ambientIntensity: number;
   hemiIntensity: number;
   sunGlow: number;
+  /**
+   * 0 = cool (blue-white sun + key), 0.5 ≈ previous default, 1 = warm (golden / sunset).
+   * Drives directional `sunLight` color, the visible sun sphere, and lens-flare tint.
+   */
+  sunTemperature: number;
 }
 
 export interface CameraFeelSettings {
@@ -66,6 +71,18 @@ export interface GamepadSettings {
   lookSpeedY: number;
 }
 
+/**
+ * Screen-space additive dust (ported from meshgl / Orby `LensDirtShader`).
+ * `exposureFactor` is driven on CPU (tone exposure proxy); no scene luminance read yet.
+ */
+export interface LensDirtSettings {
+  enabled: boolean;
+  strength: number;
+  minLuminance: number;
+  maxLuminance: number;
+  sensitivity: number;
+}
+
 /** Live-tunable WebGPU water surface (see `WaterSurfaceMesh`). */
 export interface WaterFxSettings {
   /** Hex tint multiplied with refracted scene color in the water shader (`#rrggbb`). */
@@ -101,6 +118,7 @@ export interface FxSettings {
   particles: ParticleSettings;
   audio: AudioVolumeSettings;
   water: WaterFxSettings;
+  lensDirt: LensDirtSettings;
 }
 
-export const FX_SETTINGS_STORAGE_KEY = 'candylands.fx.settings.v7';
+export const FX_SETTINGS_STORAGE_KEY = 'candylands.fx.settings.v8';

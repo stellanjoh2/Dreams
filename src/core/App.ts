@@ -47,6 +47,9 @@ export class App {
   private lastFrame = 0;
   private readonly cameraPosition = new THREE.Vector3();
   private readonly sunPosition = new THREE.Vector3();
+  private readonly cameraForward = new THREE.Vector3();
+  private readonly sunDirectionFromCam = new THREE.Vector3();
+  private readonly sunFlareTintScratch = new THREE.Color();
 
   constructor(root: HTMLElement) {
     this.ui = new UIManager(root);
@@ -193,7 +196,8 @@ export class App {
     this.postProcessing?.applySettings(this.settings);
     this.reapplyAudioVolumes();
     this.editor?.sync();
-    this.lensFlare?.setColor('#ffc090');
+    WorldManager.sunTemperatureToLightColor(this.settings.atmosphere.sunTemperature, this.sunFlareTintScratch);
+    this.lensFlare?.setColor(`#${this.sunFlareTintScratch.getHexString()}`);
     this.lensFlare?.setIntensity(this.settings.atmosphere.sunGlow);
 
     localStorage.setItem(FX_SETTINGS_STORAGE_KEY, JSON.stringify(this.settings));
@@ -212,6 +216,7 @@ export class App {
     Object.assign(this.settings.motionBlur, fresh.motionBlur);
     Object.assign(this.settings.gamepad, fresh.gamepad);
     Object.assign(this.settings.water, fresh.water);
+    Object.assign(this.settings.lensDirt, fresh.lensDirt);
     this.applySettings();
   }
 
@@ -248,13 +253,15 @@ export class App {
       }
     }
 
-    const combatActive = this.cameraSystem.locked && combatUiOk && !this.freeFlightActive;
+    /** Walking / first-person in the world (sword visible); pointer lock only gates attacks. */
+    const firstPersonWorld = combatUiOk && !this.freeFlightActive;
+    const combatActive = this.cameraSystem.locked && firstPersonWorld;
     if (this.input.consumeToggleWeaponHidden()) {
-      if (combatActive) {
+      if (firstPersonWorld) {
         this.swordCombat?.toggleWeaponHidden();
       }
     }
-    this.swordCombat?.setGameplayVisible(combatActive);
+    this.swordCombat?.setGameplayVisible(firstPersonWorld);
     this.swordCombat?.update(delta);
     if (combatActive && this.input.consumePrimaryAttack()) {
       this.swordCombat?.triggerAttack();
@@ -324,6 +331,18 @@ export class App {
       delta,
       ENABLE_EMISSIVE_LENS_FLARE ? emissiveFlareScratch : undefined,
     );
+    let lensDirtSunBoost = this.lensFlare?.getSunFlareVisibility() ?? 0;
+    if (this.cameraSystem && this.world) {
+      this.world.getSunWorldPosition(this.sunPosition);
+      this.cameraSystem.camera.getWorldDirection(this.cameraForward);
+      this.sunDirectionFromCam.subVectors(this.sunPosition, this.cameraSystem.camera.position);
+      if (this.sunDirectionFromCam.lengthSq() > 1e-4) {
+        this.sunDirectionFromCam.normalize();
+        const facing = THREE.MathUtils.clamp(this.sunDirectionFromCam.dot(this.cameraForward), 0, 1);
+        lensDirtSunBoost = Math.max(lensDirtSunBoost, facing * facing * facing);
+      }
+    }
+    this.postProcessing?.setLensDirtSunBoost(lensDirtSunBoost);
     this.rendererCore.prepareFrame();
     if (this.postProcessing) {
       this.postProcessing.render();
@@ -367,6 +386,7 @@ export class App {
         motionBlur: { ...fresh.motionBlur, ...(parsed.motionBlur ?? {}) },
         gamepad: { ...fresh.gamepad, ...(parsed.gamepad ?? {}) },
         water: { ...fresh.water, ...(parsed.water ?? {}) },
+        lensDirt: { ...fresh.lensDirt, ...(parsed.lensDirt ?? {}) },
       };
       const m = Number(merged.audio.musicVolume);
       const f = Number(merged.audio.fxVolume);
@@ -375,6 +395,12 @@ export class App {
       }
       if (!Number.isFinite(f)) {
         merged.audio.fxVolume = fresh.audio.fxVolume;
+      }
+      const sunTemp = Number(merged.atmosphere.sunTemperature);
+      if (!Number.isFinite(sunTemp)) {
+        merged.atmosphere.sunTemperature = fresh.atmosphere.sunTemperature;
+      } else {
+        merged.atmosphere.sunTemperature = THREE.MathUtils.clamp(sunTemp, 0, 1);
       }
       return merged;
     } catch {

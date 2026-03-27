@@ -4,7 +4,14 @@ import { publicUrl } from '../config/publicUrl';
 
 const SWING_DURATION = 0.52;
 const STAB_DURATION = 0.38;
-const TARGET_MAX_EXTENT = 0.92;
+/** Normalized longest axis in camera-local units (ice sword, boosted for readable FPS silhouette). */
+const TARGET_MAX_EXTENT = 0.92 * 1.035 * 1.5 * 1.12;
+
+/**
+ * `ice_sword.glb` is authored pointing into / mirroring the FPS camera vs `low_poly_sword`.
+ * Y = turn away from camera; Z = roll fix (blade “flipped”).
+ */
+const ICE_SWORD_ROOT_FIX = new THREE.Euler(0, Math.PI, Math.PI, 'YXZ');
 
 /** Single-axis horizontal slash (rad), ~140° — large readable arc, no extra twist. */
 const SWING_ANGLE = 2.45;
@@ -15,9 +22,12 @@ const SWING_SHIFT_Z = -0.08;
 const STAB_FORWARD = 0.78;
 const STAB_PITCH = 0.52;
 
-/** Bottom-right FPS idle: hilt tucked corner, blade angled up toward center (tune in-engine). */
-const IDLE_POSITION = new THREE.Vector3(0.38, -0.32, -0.58);
-const IDLE_EULER = new THREE.Euler(0.22, -0.12, 0.62, 'YXZ');
+/**
+ * Bottom-right FPS idle — relaxed carry: blade tipped **up** (not level / stabbing forward),
+ * hilt pulled in so a bit of handle shows above the bottom edge.
+ */
+const IDLE_POSITION = new THREE.Vector3(0.28, 0.05, -0.5);
+const IDLE_EULER = new THREE.Euler(0.58, -0.05, 0.38, 'YXZ');
 
 const swingAxisY = new THREE.Vector3(0, 1, 0);
 const scratchEuler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -39,7 +49,7 @@ function tuneSwordMaterial(material: THREE.Material): void {
 }
 
 /**
- * First-person free-floating sword: loads `low_poly_sword_game_ready.glb`, idle pose on camera,
+ * First-person free-floating sword: loads `ice_sword.glb`, idle pose on camera,
  * procedural swing / stab (random on trigger).
  */
 export class SwordCombatView {
@@ -62,9 +72,11 @@ export class SwordCombatView {
   }
 
   async load(): Promise<void> {
-    const url = publicUrl('assets/low_poly_sword_game_ready.glb');
+    const url = publicUrl('assets/ice_sword.glb');
     const gltf = await this.loader.loadAsync(url);
     const root = gltf.scene.clone(true);
+    root.rotation.copy(ICE_SWORD_ROOT_FIX);
+    root.updateMatrixWorld(true);
 
     const box = new THREE.Box3().setFromObject(root);
     const size = new THREE.Vector3();
@@ -101,9 +113,9 @@ export class SwordCombatView {
     this.loaded = true;
   }
 
-  /** Pointer-lock gameplay context: weapon shows only when active and not holstered. */
-  setGameplayVisible(combatActive: boolean): void {
-    this.holder.visible = this.loaded && combatActive && !this.weaponHidden;
+  /** First-person in-world (not editor / free flight); still respects holster. Pointer lock not required. */
+  setGameplayVisible(inWorldFirstPerson: boolean): void {
+    this.holder.visible = this.loaded && inWorldFirstPerson && !this.weaponHidden;
   }
 
   toggleWeaponHidden(): void {

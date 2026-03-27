@@ -40,6 +40,7 @@ export const DEFAULT_FX_SETTINGS: FxSettings = {
     ambientIntensity: 0.15,
     hemiIntensity: 1.18,
     sunGlow: 1.28,
+    sunTemperature: 0.5,
   },
   cameraFeel: {
     lookSensitivity: 0.0025,
@@ -77,5 +78,13 @@ export const DEFAULT_FX_SETTINGS: FxSettings = {
     flowSpeed: 0.052,
     foamIntensity: 0.16,
     normalDistort: 0.024,
+  },
+  /** Orby / meshgl-style dust; `public/textures/lens-dirt.jpg`. Boost follows sun flare visibility. */
+  lensDirt: {
+    enabled: true,
+    strength: 0.06,
+    minLuminance: 0.41,
+    maxLuminance: 0.79,
+    sensitivity: 0.55,
   },
 };
