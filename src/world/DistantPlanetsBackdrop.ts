@@ -29,6 +29,21 @@ const PLANET_BASE_TARGET_EXTENT = BLOCK_UNIT * 188;
 /** Per-instance scale multipliers (varied silhouettes). */
 const PLANET_SIZE_MULTIPLIERS: readonly number[] = [1.0, 1.12, 0.94, 1.06, 0.88];
 
+const MAX_PLANET_SIZE_MUL = Math.max(...PLANET_SIZE_MULTIPLIERS);
+
+/**
+ * Same radial basis as planet pivots (`load`), plus bounding slack so the sun disc sits **outside**
+ * planet meshes for correct depth (sun draws first, planets in front).
+ */
+export function getSunAnchorHorizonDistanceWorld(): number {
+  const { farOuterR } = getBackdropFarFrameMetrics();
+  const mountainOrbitMax =
+    farOuterR + BLOCK_UNIT * (MOUNTAIN_ORBIT_MARGIN_BLOCKS + MOUNTAIN_SPAWN_EXTRA_MARGIN_BLOCKS);
+  const planetR = mountainOrbitMax + BLOCK_UNIT * PLANET_ORBIT_EXTRA_BLOCKS;
+  const planetBoundsRadius = 0.5 * PLANET_BASE_TARGET_EXTENT * MAX_PLANET_SIZE_MUL;
+  return planetR + planetBoundsRadius + BLOCK_UNIT * 14;
+}
+
 /** World Y center of each planet (above mountain silhouettes on average). */
 const PLANET_Y_MULT_BLOCKS = [52, 58, 48, 62, 55] as const;
 
@@ -258,6 +273,12 @@ export class DistantPlanetsBackdrop {
             yawRadPerSec: PLANET_SPIN_YAW_RAD_PER_SEC[i] ?? 0.03,
           });
         }
+
+        this.root.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            obj.userData.lensflare = 'no-occlusion';
+          }
+        });
       },
     );
   }

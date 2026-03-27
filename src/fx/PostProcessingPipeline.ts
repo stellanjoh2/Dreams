@@ -236,6 +236,29 @@ export class PostProcessingPipeline {
     this.motionBlurEnabled = settings.motionBlur.enabled;
   }
 
+  /**
+   * Darkens tone exposure when the sun is below the horizon and slightly when it is blocked by
+   * geometry; `App` calls this every frame so the Exposure slider stays the daytime baseline.
+   */
+  syncDynamicExposure(
+    baseExposure: number,
+    sunElevationAboveHorizonRad: number,
+    sunGeometryOcclusion01: number,
+  ): void {
+    let mul = 1;
+    if (sunElevationAboveHorizonRad < 0) {
+      const t = THREE.MathUtils.smoothstep(-0.42, 0, sunElevationAboveHorizonRad);
+      mul = THREE.MathUtils.lerp(0.18, 1, t);
+    }
+    const occ = THREE.MathUtils.clamp(sunGeometryOcclusion01, 0, 1);
+    if (occ > 1e-4) {
+      mul *= THREE.MathUtils.lerp(1, 0.91, occ);
+    }
+    const effective = Math.max(0.02, baseExposure * mul);
+    this.renderer.toneMappingExposure = effective;
+    this.lensDirtExposureNode.value = THREE.MathUtils.clamp(effective / 1.25, 0.06, 1.05);
+  }
+
   applySettings(settings: FxSettings): void {
     this.latestFxSettings = settings;
 

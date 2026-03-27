@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import type { FxSettings } from '../fx/FxSettings';
+import type { AtmosphereSettings, FxSettings, WaterFxSettings } from '../fx/FxSettings';
+import { WATER_SURFACE_Y } from '../config/defaults';
 import { isFresnelCapableMaterial, updateFresnelMaterial } from '../materials/FresnelMaterial';
 import { PropFactory } from './PropFactory';
 import { AmbientDustSystem } from './AmbientDustSystem';
@@ -12,7 +13,7 @@ import {
 } from './FishingBoatProp';
 import { FloatingBarrelsProp } from './FloatingBarrelsProp';
 import { MountainBackdropProp } from './MountainBackdropProp';
-import { DistantPlanetsBackdrop } from './DistantPlanetsBackdrop';
+import { DistantPlanetsBackdrop, getSunAnchorHorizonDistanceWorld } from './DistantPlanetsBackdrop';
 import { ButterflyScatterSystem } from './ButterflyScatterSystem';
 import { WaterEdgeGrassScatter } from './WaterEdgeGrassScatter';
 import { SeaFloorRocksScatter } from './SeaFloorRocksScatter';
@@ -40,7 +41,6 @@ import {
 } from './TerrainLayout';
 import type { CrystalInstance } from '../systems/CrystalSystem';
 import { publicUrl } from '../config/publicUrl';
-import { MOUNTAIN_ORBIT_MARGIN_BLOCKS, MOUNTAIN_SPAWN_EXTRA_MARGIN_BLOCKS } from './worldHorizon';
 
 type GroundScatterPlacement = {
   variantIndex: number;
@@ -75,8 +75,8 @@ export class WorldManager {
   /** Inner group: uniform fit scale + per-tile jitter scale; pivot offset lives here so root scale does not shear the pivot. */
   private static readonly PLANT_MESH_ROOT_NAME = 'PlantMeshRoot';
   private static readonly ENVIRONMENT_MAP_URL = publicUrl('hdri/MR_EXT-010_BlueEndDayPinkClouds_Moorea_4k.png');
-  /** Visual scale for `buildSun` (pulse multiplies this each frame). */
-  private static readonly SUN_MESH_BASE_SCALE = 1.24;
+  /** Base mesh scale (+25% vs legacy); multiplied by `atmosphere.sunDiscScale` and pulse each frame. */
+  private static readonly SUN_MESH_BASE_SCALE = 1.24 * 1.25;
   /** World-space radius of the sun sphere (only geometry; halo comes from bloom). */
   private static readonly SUN_CORE_RADIUS = 34;
   /** Cool / neutral / warm for `sunTemperature` 0 → 0.5 → 1 (piecewise lerp). */
@@ -89,6 +89,41 @@ export class WorldManager {
   private static readonly SUN_TEMP_HDR_NEUTRAL = /* @__PURE__ */ new THREE.Vector3(3.28, 2.96, 2.42);
   private static readonly SUN_TEMP_HDR_WARM = /* @__PURE__ */ new THREE.Vector3(3.75, 2.65, 2.05);
   private static readonly sunTempHdrScratch = new THREE.Vector3();
+  /** Extra HDR push toward orange-red on the sun mesh near 6PM (after base temperature). */
+  private static readonly SUN_SUNSET_HDR_ORANGE = /* @__PURE__ */ new THREE.Vector3(5.35, 1.22, 0.18);
+  /** Shared vertical stops: zenith → horizon (matches `createSkyGradientTextureFromPhase`). */
+  private static readonly SKY_GRADIENT_T = [0, 0.14, 0.32, 0.48, 0.6, 0.78, 1] as const;
+  private static readonly SKY_NOON_HEX = [
+    '#2d6fb3',
+    '#4ba6cf',
+    '#a1c2cf',
+    '#e8d0c4',
+    '#f9dfa8',
+    '#f2b078',
+    '#efa055',
+  ] as const;
+  /** Dusk palette — less neon magenta than v1; reads coral / peach / gold toward horizon. */
+  private static readonly SKY_SUNSET_HEX = [
+    '#2a2248',
+    '#4d3d68',
+    '#9a6e82',
+    '#e08868',
+    '#e87838',
+    '#f0a028',
+    '#ffe090',
+  ] as const;
+  /** Cool moonlit sky (zenith → horizon); used when the sun is below the horizon. */
+  private static readonly SKY_NIGHT_HEX = [
+    '#060a14',
+    '#0a1224',
+    '#0f1a34',
+    '#152848',
+    '#1a3254',
+    '#1f3a5c',
+    '#284a6e',
+  ] as const;
+  /** Fixed solar arc amplitude (removed from FX panel — time-of-day drives height). */
+  private static readonly SUN_NOON_ELEVATION_DEG = 68;
   /**
    * Hint XZ (world) for which compass sector the sun sits in; anchor length is recomputed from backdrop
    * metrics so the disk sits **past** the mountain ring.
@@ -150,6 +185,8 @@ export class WorldManager {
   /** At most one scatter prop (plant/crystal/…) per `gridX:gridZ` surface cell. */
   private readonly decorOccupiedSurfaceKeys = new Set<string>();
   private readonly sunWorldPosition = new THREE.Vector3();
+  /** From `atmosphere.sunDiscScale`; updated in `applyFxSettings`. */
+  private sunDiscScaleUser = 1;
   private readonly respawnPoints: THREE.Vector3[] = [];
   private readonly terrainSnapPosition = new THREE.Vector3();
   private readonly terrainSnapNormal = new THREE.Vector3();
@@ -160,6 +197,19 @@ export class WorldManager {
   private readonly terrainSnapIdentityQuaternion = new THREE.Quaternion();
   private readonly crystalLayoutDummy = new THREE.Object3D();
   private nextRespawnIndex = 0;
+  /** Avoid rebaking sky canvas when time slider hasn’t moved meaningfully. */
+  private skyGradientTimeKey = '';
+  private readonly twilightFogScratch = new THREE.Color();
+  private readonly twilightAmbientScratch = new THREE.Color();
+  private readonly twilightHemiSkyScratch = new THREE.Color();
+  private readonly twilightHemiGroundScratch = new THREE.Color();
+  private readonly twilightZenithScratch = new THREE.Color();
+  private readonly skyStopScratchA = new THREE.Color();
+  private readonly skyStopScratchB = new THREE.Color();
+  private readonly skyHslScratch = { h: 0, s: 0, l: 0 };
+  private readonly waterTwilightScratch = new THREE.Color();
+  private readonly waterWarmTint = /* @__PURE__ */ new THREE.Color('#ff7a4a');
+  private readonly nightLiftTarget = new THREE.Color();
 
   constructor(audioHooks?: WorldAudioHooks) {
     this.cactusEnemies = new CactusEnemySystem(
@@ -190,12 +240,13 @@ export class WorldManager {
     );
 
     this.loadEnvironmentMap();
-    this.buildSkyDome();
-    this.updateSunAnchorFromBackdrop();
+    this.buildSkyDome(settings.atmosphere);
+    this.updateSunPositionFromAtmosphere(settings.atmosphere);
     this.buildLights(settings);
     this.buildSun(settings);
     this.distantBackdrop = createDistantWorldBackdrop();
     this.worldRoot.add(this.distantBackdrop);
+    WorldManager.markSubtreeNoLensflareOcclusion(this.distantBackdrop);
     this.terrainRootGroup = this.terrain.createGround(waterHighFrequencyNormal, settings.water.color);
     this.worldRoot.add(this.terrainRootGroup);
     this.fishSchools.load();
@@ -209,6 +260,7 @@ export class WorldManager {
     this.worldRoot.add(this.plantScatterRoot);
     this.buildLandmarks();
     this.worldRoot.add(this.ambientDust.mesh);
+    WorldManager.markSubtreeNoLensflareOcclusion(this.ambientDust.mesh);
     this.ambientDust.applySettings(settings.particles);
 
     return this.buildCrystals();
@@ -260,7 +312,9 @@ export class WorldManager {
 
     if (this.sunGroup) {
       const pulse = 1 + Math.sin(elapsed * 0.45) * 0.03;
-      this.sunGroup.scale.setScalar(WorldManager.SUN_MESH_BASE_SCALE * pulse);
+      this.sunGroup.scale.setScalar(
+        WorldManager.SUN_MESH_BASE_SCALE * this.sunDiscScaleUser * pulse,
+      );
     }
     this.ambientDust.update(elapsed, camera);
     this.fishSchools.update(delta, elapsed);
@@ -290,36 +344,131 @@ export class WorldManager {
     this.terrainPhysics.update(elapsed);
   }
 
-  applyFxSettings(settings: FxSettings): void {
-    this.scene.background = new THREE.Color('#2d6fb3');
+  /**
+   * Zenith clear color, fog, ambient, hemisphere, and cool fill — invoked from `applyFxSettings`
+   * (FX panel `input` events already run every frame while dragging time-of-day).
+   */
+  private applyTimeOfDayAmbience(settings: FxSettings, sunsetPhase: number): void {
+    const elev = WorldManager.computeSunElevationAboveHorizonRad(settings.atmosphere.sunTimeOfDayHours);
+    const night01 = WorldManager.nightPhase01FromElevation(elev);
+    /** Fade sunset tints after dark so warm dusk doesn’t fight moonlit blue. */
+    const sunsetWeight = 1 - night01;
+
+    const skyZenithBlend = Math.pow(sunsetPhase, 0.92) * sunsetWeight;
+    this.twilightHemiSkyScratch.set(WorldManager.SKY_SUNSET_HEX[0]);
+    this.twilightZenithScratch.set(WorldManager.SKY_NOON_HEX[0]).lerp(this.twilightHemiSkyScratch, skyZenithBlend);
+    if (night01 > 1e-4) {
+      this.nightLiftTarget.set('#0c1222');
+      this.twilightZenithScratch.lerp(this.nightLiftTarget, night01 * 0.92);
+    }
+    if (this.scene.background instanceof THREE.Color) {
+      this.scene.background.copy(this.twilightZenithScratch);
+    } else {
+      this.scene.background = this.twilightZenithScratch.clone();
+    }
 
     if (this.scene.fog instanceof THREE.FogExp2) {
-      this.scene.fog.color.set(settings.atmosphere.fogColor);
+      this.twilightFogScratch.set(settings.atmosphere.fogColor);
+      this.twilightHemiSkyScratch.set('#9b6ba8');
+      this.twilightFogScratch.lerp(this.twilightHemiSkyScratch, sunsetPhase * 0.52 * sunsetWeight);
+      this.twilightHemiGroundScratch.set('#c87858');
+      this.twilightFogScratch.lerp(this.twilightHemiGroundScratch, sunsetPhase * 0.28 * sunsetWeight);
+      if (night01 > 1e-4) {
+        this.nightLiftTarget.set('#141c2e');
+        this.twilightFogScratch.lerp(this.nightLiftTarget, night01 * 0.72);
+      }
+      this.scene.fog.color.copy(this.twilightFogScratch);
       this.scene.fog.density = settings.atmosphere.fogDensity;
     }
 
     if (this.ambientLight) {
-      this.ambientLight.color.set('#d8e6f0');
-      this.ambientLight.intensity = settings.atmosphere.ambientIntensity;
+      this.twilightAmbientScratch.set('#d8e6f0');
+      this.twilightHemiSkyScratch.set('#f2d2c4');
+      this.twilightAmbientScratch.lerp(this.twilightHemiSkyScratch, sunsetPhase * 0.42 * sunsetWeight);
+      if (night01 > 1e-4) {
+        this.nightLiftTarget.set('#b8cff5');
+        this.twilightAmbientScratch.lerp(this.nightLiftTarget, night01 * 0.97);
+      }
+      this.ambientLight.color.copy(this.twilightAmbientScratch);
+      this.ambientLight.intensity =
+        settings.atmosphere.ambientIntensity *
+        (1 + sunsetPhase * 0.06 * sunsetWeight) *
+        THREE.MathUtils.lerp(1, 1.45, night01);
     }
 
     if (this.hemiLight) {
-      this.hemiLight.color.set('#8ebfe0');
-      this.hemiLight.groundColor.set('#f2e0c8');
-      this.hemiLight.intensity = settings.atmosphere.hemiIntensity;
+      this.twilightHemiSkyScratch.set('#8ebfe0');
+      this.twilightZenithScratch.set('#b88fd8');
+      this.twilightHemiSkyScratch.lerp(this.twilightZenithScratch, sunsetPhase * 0.58 * sunsetWeight);
+      if (night01 > 1e-4) {
+        this.nightLiftTarget.set('#6a9bd4');
+        this.twilightHemiSkyScratch.lerp(this.nightLiftTarget, night01 * 0.96);
+      }
+      this.hemiLight.color.copy(this.twilightHemiSkyScratch);
+      this.twilightHemiGroundScratch.set('#f2e0c8');
+      this.twilightZenithScratch.set('#f0b898');
+      this.twilightHemiGroundScratch.lerp(this.twilightZenithScratch, sunsetPhase * 0.45 * sunsetWeight);
+      if (night01 > 1e-4) {
+        this.nightLiftTarget.set('#1e2c44');
+        this.twilightHemiGroundScratch.lerp(this.nightLiftTarget, night01 * 0.88);
+      }
+      this.hemiLight.groundColor.copy(this.twilightHemiGroundScratch);
+      this.hemiLight.intensity = settings.atmosphere.hemiIntensity * THREE.MathUtils.lerp(1, 0.32, night01);
     }
 
+    if (this.coolLight) {
+      this.coolLight.intensity =
+        1.8 * (1 - sunsetPhase * 0.45 * sunsetWeight) * THREE.MathUtils.lerp(1, 1.65, night01);
+      this.coolLight.color.set('#8ebeff');
+      if (night01 > 0.08) {
+        this.nightLiftTarget.set('#d2e8ff');
+        this.coolLight.color.lerp(this.nightLiftTarget, Math.min(1, night01 * 1.1));
+      }
+    }
+  }
+
+  applyFxSettings(settings: FxSettings): void {
+    const sunsetPhase = WorldManager.computeSunsetPhase01(settings.atmosphere.sunTimeOfDayHours);
+    const elevSky = WorldManager.computeSunElevationAboveHorizonRad(settings.atmosphere.sunTimeOfDayHours);
+    this.refreshSkyGradientTexture(
+      settings.atmosphere.sunTimeOfDayHours,
+      sunsetPhase,
+      WorldManager.nightPhase01FromElevation(elevSky),
+    );
+    this.applyTimeOfDayAmbience(settings, sunsetPhase);
+
+    const effectiveSunTemp = WorldManager.computeEffectiveSunTemperature(settings.atmosphere);
+    const sunTintTemp = THREE.MathUtils.clamp(effectiveSunTemp + sunsetPhase * 0.4, 0, 1);
+
     if (this.sunCore?.material instanceof THREE.MeshBasicMaterial) {
-      WorldManager.applySunCoreHdrColor(this.sunCore.material, settings.atmosphere.sunTemperature);
+      WorldManager.applySunCoreHdrColorWithSunset(this.sunCore.material, effectiveSunTemp, sunsetPhase);
     }
 
     if (this.sunLight) {
-      this.sunLight.intensity = 3.45 * settings.atmosphere.sunGlow;
-      WorldManager.sunTemperatureToLightColor(settings.atmosphere.sunTemperature, this.sunLight.color);
+      this.sunLight.intensity = 3.45 * settings.atmosphere.sunGlow * (1 + sunsetPhase * 0.1);
+      WorldManager.sunTemperatureToLightColor(sunTintTemp, this.sunLight.color);
     }
 
+    const disc = Number(settings.atmosphere.sunDiscScale);
+    this.sunDiscScaleUser = Number.isFinite(disc)
+      ? THREE.MathUtils.clamp(disc, 0.2, 3.5)
+      : 1;
+
+    this.updateSunPositionFromAtmosphere(settings.atmosphere);
+    if (this.sunGroup) {
+      this.sunGroup.position.copy(this.sunAnchor);
+    }
+    this.syncSunLighting();
+
     this.ambientDust.applySettings(settings.particles);
-    this.terrain.applyWaterFxSettings(settings.water);
+
+    this.waterTwilightScratch.set(settings.water.color);
+    this.waterTwilightScratch.lerp(this.waterWarmTint, sunsetPhase * 0.36);
+    const waterFx: WaterFxSettings = {
+      ...settings.water,
+      color: `#${this.waterTwilightScratch.getHexString()}`,
+    };
+    this.terrain.applyWaterFxSettings(waterFx);
 
     if (this.environmentTexture) {
       this.scene.environment = this.environmentTexture;
@@ -359,13 +508,16 @@ export class WorldManager {
     return target.copy(this.sunWorldPosition);
   }
 
+  /**
+   * Terrain + mountain ring only. Raycasting the full `worldRoot` tests every instanced backdrop
+   * cube / plant / crystal before `no-occlusion` filtering and destroys frame time.
+   */
   getLensFlareOccluders(): THREE.Object3D[] {
-    return [this.worldRoot];
-  }
-
-  /** Mountains only — avoids treating nearby terrain/candy as blocking the sun flare. */
-  getSunFlareOccluders(): THREE.Object3D[] {
-    return [this.mountainBackdrop.root];
+    const list: THREE.Object3D[] = [this.mountainBackdrop.root];
+    if (this.terrainRootGroup) {
+      list.push(this.terrainRootGroup);
+    }
+    return list;
   }
 
   getGroundHeightAt(x: number, z: number, supportRadius?: number, maxHeight?: number): number | null {
@@ -406,11 +558,14 @@ export class WorldManager {
     );
     this.scene.add(this.hemiLight);
 
-    const sunCol = WorldManager.sunTemperatureToLightColor(
-      settings.atmosphere.sunTemperature,
-      new THREE.Color(),
+    const sunsetPh = WorldManager.computeSunsetPhase01(settings.atmosphere.sunTimeOfDayHours);
+    const sunTint = THREE.MathUtils.clamp(
+      WorldManager.computeEffectiveSunTemperature(settings.atmosphere) + sunsetPh * 0.4,
+      0,
+      1,
     );
-    this.sunLight = new THREE.DirectionalLight(sunCol, 3.45 * settings.atmosphere.sunGlow);
+    const sunCol = WorldManager.sunTemperatureToLightColor(sunTint, new THREE.Color());
+    this.sunLight = new THREE.DirectionalLight(sunCol, 3.45 * settings.atmosphere.sunGlow * (1 + sunsetPh * 0.1));
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.set(1536, 1536);
     this.sunLight.shadow.bias = -0.00008;
@@ -433,6 +588,83 @@ export class WorldManager {
     this.scene.add(this.coolLight);
 
     this.syncSunLighting();
+  }
+
+  /**
+   * Elevation above horizon (radians). Hour 12 = +noonMax; 6 & 18 = 0; 0 (midnight) = −noonMax.
+   */
+  static computeSunElevationAboveHorizonRad(timeHours: number): number {
+    const h = THREE.MathUtils.euclideanModulo(timeHours, 24);
+    const noon = THREE.MathUtils.degToRad(WorldManager.SUN_NOON_ELEVATION_DEG);
+    return noon * Math.cos(((h - 12) / 24) * Math.PI * 2);
+  }
+
+  /** 0 in daylight; eases to 1 when the sun is below the horizon (cool night read). */
+  static nightPhase01FromElevation(elevationAboveHorizonRad: number): number {
+    if (elevationAboveHorizonRad >= 0) {
+      return 0;
+    }
+    return THREE.MathUtils.smoothstep(0, 0.32, -elevationAboveHorizonRad);
+  }
+
+  /**
+   * 0 = cool (night below horizon), 1 = warm at horizon; zenith cools via 1−sin(elev).
+   */
+  static computeTimeDrivenSunWarmth01(elevationAboveHorizonRad: number): number {
+    if (elevationAboveHorizonRad < -0.035) {
+      return 0;
+    }
+    const e = Math.max(0, elevationAboveHorizonRad);
+    return 1 - Math.sin(THREE.MathUtils.clamp(e, 0, Math.PI / 2));
+  }
+
+  /** Combines time-of-day warmth with {@link AtmosphereSettings.sunTemperature} bias (0.5 = neutral). */
+  static computeEffectiveSunTemperature(atmosphere: AtmosphereSettings): number {
+    const el = WorldManager.computeSunElevationAboveHorizonRad(atmosphere.sunTimeOfDayHours);
+    const auto = WorldManager.computeTimeDrivenSunWarmth01(el);
+    const bias = Number(atmosphere.sunTemperature);
+    const b = Number.isFinite(bias) ? THREE.MathUtils.clamp(bias, 0, 1) : 0.5;
+    return THREE.MathUtils.clamp(auto + (b - 0.5) * 1.2, 0, 1);
+  }
+
+  /** Raycast targets with this skip sky / sun / decorative backdrop so lens flare occludes on real geometry only. */
+  private static markSubtreeNoLensflareOcclusion(root: THREE.Object3D): void {
+    root.traverse((obj) => {
+      if (
+        obj instanceof THREE.Mesh ||
+        obj instanceof THREE.Points ||
+        obj instanceof THREE.Line ||
+        obj instanceof THREE.LineSegments
+      ) {
+        obj.userData.lensflare = 'no-occlusion';
+      }
+    });
+  }
+
+  /**
+   * 0 = noon blue; warm sunset ramps from ~14:00, full by ~19:45. Night sky tint uses sun elevation, not this alone.
+   */
+  static computeSunsetPhase01(timeHours: number): number {
+    const h = THREE.MathUtils.euclideanModulo(timeHours, 24);
+    if (h < 12) {
+      return 0;
+    }
+    if (h < 14) {
+      return 0;
+    }
+    if (h >= 19.75) {
+      return 1;
+    }
+    return THREE.MathUtils.smoothstep(h, 14, 19.75);
+  }
+
+  /**
+   * Lens flare / UI tint: matches directional sun push toward orange near sunset.
+   */
+  static computeSunVisualTemperatureForFlare(atmosphere: AtmosphereSettings): number {
+    const ph = WorldManager.computeSunsetPhase01(atmosphere.sunTimeOfDayHours);
+    const base = WorldManager.computeEffectiveSunTemperature(atmosphere);
+    return THREE.MathUtils.clamp(base + ph * 0.4, 0, 1);
   }
 
   /**
@@ -463,6 +695,23 @@ export class WorldManager {
     material.color.setRGB(v.x, v.y, v.z);
   }
 
+  private static applySunCoreHdrColorWithSunset(
+    material: THREE.MeshBasicMaterial,
+    temperature01: number,
+    sunsetPhase01: number,
+  ): void {
+    WorldManager.applySunCoreHdrColor(material, temperature01);
+    const ph = THREE.MathUtils.clamp(sunsetPhase01, 0, 1);
+    if (ph <= 1e-4) {
+      return;
+    }
+    const w = ph * ph * (0.55 + ph * 0.35);
+    const v = WorldManager.sunTempHdrScratch;
+    v.set(material.color.r, material.color.g, material.color.b);
+    v.lerp(WorldManager.SUN_SUNSET_HDR_ORANGE, w);
+    material.color.setRGB(v.x, v.y, v.z);
+  }
+
   private buildSun(settings: FxSettings): void {
     const coreGeo = new THREE.SphereGeometry(WorldManager.SUN_CORE_RADIUS, 48, 32);
     const coreMat = new THREE.MeshBasicMaterial({
@@ -471,29 +720,32 @@ export class WorldManager {
       depthTest: true,
       depthWrite: true,
     });
-    WorldManager.applySunCoreHdrColor(coreMat, settings.atmosphere.sunTemperature);
+    WorldManager.applySunCoreHdrColorWithSunset(
+      coreMat,
+      WorldManager.computeEffectiveSunTemperature(settings.atmosphere),
+      WorldManager.computeSunsetPhase01(settings.atmosphere.sunTimeOfDayHours),
+    );
     this.sunCore = new THREE.Mesh(coreGeo, coreMat);
 
     this.sunGroup = new THREE.Group();
     this.sunGroup.add(this.sunCore);
     this.sunGroup.position.copy(this.sunAnchor);
-    this.sunGroup.scale.setScalar(WorldManager.SUN_MESH_BASE_SCALE);
+    const disc = Number(settings.atmosphere.sunDiscScale);
+    this.sunDiscScaleUser = Number.isFinite(disc)
+      ? THREE.MathUtils.clamp(disc, 0.2, 3.5)
+      : 1;
+    this.sunGroup.scale.setScalar(WorldManager.SUN_MESH_BASE_SCALE * this.sunDiscScaleUser);
     this.scene.add(this.sunGroup);
+    WorldManager.markSubtreeNoLensflareOcclusion(this.sunGroup);
   }
 
   /**
-   * Park the sun **outside** the mountain orbit (same basis as `MountainBackdropProp`) so depth tests
-   * draw silhouettes in front of the disk while light direction stays similar.
+   * Sun on a sphere around the playfield centroid: azimuth from settings, elevation from time of day,
+   * radius past distant planets (`getSunAnchorHorizonDistanceWorld`).
    */
-  private updateSunAnchorFromBackdrop(): void {
-    const { centerX, centerZ, farOuterR } = getBackdropFarFrameMetrics();
-    const orbitBase = farOuterR + BLOCK_UNIT * MOUNTAIN_ORBIT_MARGIN_BLOCKS;
-    const orbitMax = orbitBase + BLOCK_UNIT * MOUNTAIN_SPAWN_EXTRA_MARGIN_BLOCKS;
-    /**
-     * Just past the farthest mountain pivot (not a full mesh radius beyond it): far enough to read
-     * “behind” the ring, close enough that the disk isn’t always depth-occluded / sub-pixel.
-     */
-    const radial = orbitMax + BLOCK_UNIT * 52;
+  private updateSunPositionFromAtmosphere(atmosphere: AtmosphereSettings): void {
+    const { centerX, centerZ } = getBackdropFarFrameMetrics();
+    const radial = getSunAnchorHorizonDistanceWorld();
 
     const inPlane = new THREE.Vector3(
       WorldManager.SUN_AZIMUTH_HINT_XZ.x - centerX,
@@ -505,21 +757,61 @@ export class WorldManager {
     }
     inPlane.normalize();
 
-    this.sunAnchor.set(centerX + inPlane.x * radial, 112, centerZ + inPlane.z * radial);
+    const yaw = THREE.MathUtils.degToRad(THREE.MathUtils.euclideanModulo(atmosphere.sunAzimuthDegrees, 360));
+    const cy = Math.cos(yaw);
+    const sy = Math.sin(yaw);
+    const rx = inPlane.x * cy - inPlane.z * sy;
+    const rz = inPlane.x * sy + inPlane.z * cy;
+    inPlane.set(rx, 0, rz);
+
+    const el = WorldManager.computeSunElevationAboveHorizonRad(atmosphere.sunTimeOfDayHours);
+    const cEl = Math.cos(el);
+    const sEl = Math.sin(el);
+    const dirX = inPlane.x * cEl;
+    const dirY = sEl;
+    const dirZ = inPlane.z * cEl;
+
+    const focusY = WATER_SURFACE_Y + BLOCK_UNIT * 22;
+    this.sunAnchor.set(centerX + dirX * radial, focusY + dirY * radial, centerZ + dirZ * radial);
   }
 
-  private buildSkyDome(): void {
-    const skyTexture = this.createSkyGradientTexture();
+  private buildSkyDome(atmosphere: AtmosphereSettings): void {
+    const phase = WorldManager.computeSunsetPhase01(atmosphere.sunTimeOfDayHours);
+    const elev = WorldManager.computeSunElevationAboveHorizonRad(atmosphere.sunTimeOfDayHours);
+    const nightPh = WorldManager.nightPhase01FromElevation(elev);
+    this.skyGradientTimeKey = `${atmosphere.sunTimeOfDayHours.toFixed(3)}|${nightPh.toFixed(2)}`;
+    const skyTexture = this.createSkyGradientTextureFromPhase(phase, nightPh);
     const skyMaterial = new THREE.MeshBasicMaterial({
       map: skyTexture,
       side: THREE.BackSide,
-      fog: true,
+      /** Exp2 fog at ~400m+ flattens the canvas gradient toward fog tint; sky reads as a solid wash. */
+      fog: false,
       depthWrite: false,
     });
 
-    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(260, 48, 28), skyMaterial);
+    const skyRadius = Math.max(420, getSunAnchorHorizonDistanceWorld() * 1.28 + 180);
+    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(skyRadius, 48, 28), skyMaterial);
     this.skyDome.renderOrder = -100;
     this.scene.add(this.skyDome);
+    WorldManager.markSubtreeNoLensflareOcclusion(this.skyDome);
+  }
+
+  private refreshSkyGradientTexture(timeHours: number, sunsetPhase01: number, nightPhase01: number): void {
+    if (!this.skyDome) {
+      return;
+    }
+    const key = `${timeHours.toFixed(3)}|${nightPhase01.toFixed(2)}`;
+    if (key === this.skyGradientTimeKey) {
+      return;
+    }
+    this.skyGradientTimeKey = key;
+    const tex = this.createSkyGradientTextureFromPhase(sunsetPhase01, nightPhase01);
+    const mat = this.skyDome.material;
+    if (mat instanceof THREE.MeshBasicMaterial) {
+      mat.map?.dispose();
+      mat.map = tex;
+      mat.needsUpdate = true;
+    }
   }
 
   private buildLandmarks(): void {
@@ -583,6 +875,7 @@ export class WorldManager {
       this.cloudRingGroup = group;
       this.orbitalClouds = clouds;
       this.worldRoot.add(group);
+      WorldManager.markSubtreeNoLensflareOcclusion(group);
     } catch (err) {
       console.warn('[WorldManager] Could not load stylized cloud pack:', err);
     }
@@ -1011,7 +1304,8 @@ export class WorldManager {
     geometry.attributes.uv.needsUpdate = true;
   }
 
-  private createSkyGradientTexture(): THREE.CanvasTexture {
+  /** Canvas gradient: noon ↔ sunset while up; lerps to {@link SKY_NIGHT_HEX} when `nightPhase01` rises. */
+  private createSkyGradientTextureFromPhase(sunsetPhase01: number, nightPhase01: number): THREE.CanvasTexture {
     const canvas = document.createElement('canvas');
     canvas.width = 32;
     canvas.height = 512;
@@ -1021,15 +1315,33 @@ export class WorldManager {
       throw new Error('Candy Lands could not create the sky gradient context.');
     }
 
-    /** Zenith → horizon: shorter cool band so peach/cream/gold read in mid-sky, not only at the rim. */
+    const ph = THREE.MathUtils.clamp(sunsetPhase01, 0, 1);
+    const night = THREE.MathUtils.clamp(nightPhase01, 0, 1);
+    const duskOnly = ph * (1 - night);
+    /** Slightly ahead of fog/lights so warm horizon reads earlier in the afternoon. */
+    const skyBlend = Math.pow(duskOnly, 0.88);
     const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
-    gradient.addColorStop(0, '#2d6fb3');
-    gradient.addColorStop(0.14, '#4ba6cf');
-    gradient.addColorStop(0.32, '#a1c2cf');
-    gradient.addColorStop(0.48, '#e8d0c4');
-    gradient.addColorStop(0.6, '#f9dfa8');
-    gradient.addColorStop(0.78, '#f2b078');
-    gradient.addColorStop(1, '#efa055');
+    const stops = WorldManager.SKY_GRADIENT_T;
+    for (let i = 0; i < stops.length; i += 1) {
+      this.skyStopScratchA.set(WorldManager.SKY_NOON_HEX[i]);
+      this.skyStopScratchB.set(WorldManager.SKY_SUNSET_HEX[i]);
+      this.skyStopScratchA.lerp(this.skyStopScratchB, skyBlend);
+      const satBoost = 0.28 * skyBlend;
+      if (satBoost > 1e-4) {
+        this.skyStopScratchA.getHSL(this.skyHslScratch);
+        this.skyHslScratch.s = THREE.MathUtils.clamp(
+          this.skyHslScratch.s + (1 - this.skyHslScratch.s) * satBoost,
+          0,
+          1,
+        );
+        this.skyStopScratchA.setHSL(this.skyHslScratch.h, this.skyHslScratch.s, this.skyHslScratch.l);
+      }
+      if (night > 1e-4) {
+        this.skyStopScratchB.set(WorldManager.SKY_NIGHT_HEX[i]);
+        this.skyStopScratchA.lerp(this.skyStopScratchB, night * 0.96);
+      }
+      gradient.addColorStop(stops[i], `#${this.skyStopScratchA.getHexString()}`);
+    }
     context.fillStyle = gradient;
     context.fillRect(0, 0, canvas.width, canvas.height);
 

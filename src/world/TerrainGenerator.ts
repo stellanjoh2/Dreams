@@ -33,7 +33,7 @@ type GerstnerWaveParams = {
   wavelength: number;
   /** Vertical amplitude (meters). */
   amplitude: number;
-  /** 0 = pure sine in Z only; toward 1 = stronger horizontal orbital motion (sharper crests). */
+  /** 0 = sine in Z only; higher = more horizontal orbital motion (trochoidal pinch / sharper crests). */
   steepness: number;
   /** Constant phase offset (radians). */
   phase: number;
@@ -47,7 +47,7 @@ const WATER_GERSTNER_WAVES: readonly GerstnerWaveParams[] = [
     dirY: 0.38,
     wavelength: 52,
     amplitude: 0.1,
-    steepness: 0.62,
+    steepness: 0.78,
     phase: 0.35,
     speedScale: 0.92,
   },
@@ -56,7 +56,7 @@ const WATER_GERSTNER_WAVES: readonly GerstnerWaveParams[] = [
     dirY: 1,
     wavelength: 38,
     amplitude: 0.078,
-    steepness: 0.58,
+    steepness: 0.74,
     phase: 2.05,
     speedScale: 1.02,
   },
@@ -65,7 +65,7 @@ const WATER_GERSTNER_WAVES: readonly GerstnerWaveParams[] = [
     dirY: -0.68,
     wavelength: 29,
     amplitude: 0.055,
-    steepness: 0.52,
+    steepness: 0.68,
     phase: 4.2,
     speedScale: 0.88,
   },
@@ -74,7 +74,7 @@ const WATER_GERSTNER_WAVES: readonly GerstnerWaveParams[] = [
     dirY: 1,
     wavelength: 67,
     amplitude: 0.062,
-    steepness: 0.48,
+    steepness: 0.62,
     phase: 1.45,
     speedScale: 0.75,
   },

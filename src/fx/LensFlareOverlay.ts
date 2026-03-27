@@ -205,8 +205,6 @@ export class LensFlareOverlay {
   private readonly raycaster = new THREE.Raycaster();
   private readonly intersections: THREE.Intersection[] = [];
   private occlusionObjects: THREE.Object3D[] | null = null;
-  /** If set, used only for **sun** flare occlusion (e.g. mountains). Emissive still uses `occlusionObjects`. */
-  private sunOcclusionObjects: THREE.Object3D[] | null = null;
   private color = '#ffcc98';
   private intensity = 1;
   private visibility = 0;
@@ -214,6 +212,8 @@ export class LensFlareOverlay {
   private lastUpdateTime = 0;
   private lastSunOcclusionCheckTime = 0;
   private sunOccluded = false;
+  /** Smoothed 0–1: sun on-screen but blocked by geometry (drives a small exposure dip). */
+  private sunGeometryOcclusionDamp = 0;
   private emissiveVisibility = 0;
   private emissiveTargetVisibility = 0;
   private lastEmissiveColor = '';
@@ -243,12 +243,13 @@ export class LensFlareOverlay {
     return this.visibility;
   }
 
-  setOcclusionObjects(objects: THREE.Object3D[] | null): void {
-    this.occlusionObjects = objects && objects.length > 0 ? objects : null;
+  /** Damped 0–1 — sun in view frustum but raycast hits world geometry before the sun. */
+  getSunGeometryOcclusion01(): number {
+    return this.sunGeometryOcclusionDamp;
   }
 
-  setSunOcclusionObjects(objects: THREE.Object3D[] | null): void {
-    this.sunOcclusionObjects = objects && objects.length > 0 ? objects : null;
+  setOcclusionObjects(objects: THREE.Object3D[] | null): void {
+    this.occlusionObjects = objects && objects.length > 0 ? objects : null;
   }
 
   update(
@@ -329,6 +330,15 @@ export class LensFlareOverlay {
       this.sunOccluded = this.checkSunOcclusion(camera, worldTarget);
     }
     this.targetVisibility = this.sunOccluded ? 0 : baseVisibility;
+
+    const occTarget = this.sunOccluded ? 1 : 0;
+    const occFade = occTarget < this.sunGeometryOcclusionDamp ? 16 : 7;
+    this.sunGeometryOcclusionDamp = THREE.MathUtils.damp(
+      this.sunGeometryOcclusionDamp,
+      occTarget,
+      occFade,
+      delta,
+    );
 
     const fadeSpeed = this.targetVisibility < this.visibility ? 18 : 6;
     this.visibility = THREE.MathUtils.damp(this.visibility, this.targetVisibility, fadeSpeed, delta);
@@ -650,9 +660,9 @@ export class LensFlareOverlay {
     }
   }
 
-  /** Sun: prefer `sunOcclusionObjects` (mountains) so terrain doesn’t kill the flare. */
+  /** Sun: same world raycast as emissive; meshes tagged `userData.lensflare === 'no-occlusion'` are skipped. */
   private checkSunOcclusion(camera: THREE.Camera, worldTarget: THREE.Vector3): boolean {
-    const list = this.sunOcclusionObjects ?? this.occlusionObjects;
+    const list = this.occlusionObjects;
     if (!list || list.length === 0) {
       return false;
     }

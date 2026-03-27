@@ -129,7 +129,6 @@ export class App {
     );
     this.lensFlare = new LensFlareOverlay(this.ui.fxMount);
     this.lensFlare.setOcclusionObjects(this.world.getLensFlareOccluders());
-    this.lensFlare.setSunOcclusionObjects(this.world.getSunFlareOccluders());
 
     this.applySettings();
     this.ui.setChromeVisible(false);
@@ -197,7 +196,10 @@ export class App {
     this.postProcessing?.applySettings(this.settings);
     this.reapplyAudioVolumes();
     this.editor?.sync();
-    WorldManager.sunTemperatureToLightColor(this.settings.atmosphere.sunTemperature, this.sunFlareTintScratch);
+    WorldManager.sunTemperatureToLightColor(
+      WorldManager.computeSunVisualTemperatureForFlare(this.settings.atmosphere),
+      this.sunFlareTintScratch,
+    );
     this.lensFlare?.setColor(`#${this.sunFlareTintScratch.getHexString()}`);
     this.lensFlare?.setIntensity(this.settings.atmosphere.sunGlow);
 
@@ -344,6 +346,9 @@ export class App {
       }
     }
     this.postProcessing?.setLensDirtSunBoost(lensDirtSunBoost);
+    const sunElev = WorldManager.computeSunElevationAboveHorizonRad(this.settings.atmosphere.sunTimeOfDayHours);
+    const sunGeomOcc = this.lensFlare?.getSunGeometryOcclusion01() ?? 0;
+    this.postProcessing?.syncDynamicExposure(this.settings.exposure, sunElev, sunGeomOcc);
     this.rendererCore.prepareFrame();
     if (this.postProcessing) {
       this.postProcessing.render();
@@ -402,6 +407,24 @@ export class App {
         merged.atmosphere.sunTemperature = fresh.atmosphere.sunTemperature;
       } else {
         merged.atmosphere.sunTemperature = THREE.MathUtils.clamp(sunTemp, 0, 1);
+      }
+      const sunAz = Number(merged.atmosphere.sunAzimuthDegrees);
+      if (!Number.isFinite(sunAz)) {
+        merged.atmosphere.sunAzimuthDegrees = fresh.atmosphere.sunAzimuthDegrees;
+      } else {
+        merged.atmosphere.sunAzimuthDegrees = THREE.MathUtils.euclideanModulo(sunAz, 360);
+      }
+      const sunDisc = Number(merged.atmosphere.sunDiscScale);
+      if (!Number.isFinite(sunDisc)) {
+        merged.atmosphere.sunDiscScale = fresh.atmosphere.sunDiscScale;
+      } else {
+        merged.atmosphere.sunDiscScale = THREE.MathUtils.clamp(sunDisc, 0.2, 3.5);
+      }
+      const sunH = Number(merged.atmosphere.sunTimeOfDayHours);
+      if (!Number.isFinite(sunH)) {
+        merged.atmosphere.sunTimeOfDayHours = fresh.atmosphere.sunTimeOfDayHours;
+      } else {
+        merged.atmosphere.sunTimeOfDayHours = THREE.MathUtils.euclideanModulo(sunH, 24);
       }
       return merged;
     } catch {

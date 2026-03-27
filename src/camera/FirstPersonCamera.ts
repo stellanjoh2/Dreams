@@ -19,11 +19,12 @@ export class FirstPersonCamera {
     const viewport = window.visualViewport;
     const width = viewport?.width || window.innerWidth || 1;
     const height = viewport?.height || window.innerHeight || 1;
+    /** Past sky dome + sun orbit (`getSunAnchorHorizonDistanceWorld`); 400 clipped the gradient & disc. */
     this.camera = new THREE.PerspectiveCamera(
       72,
       width / Math.max(1, height),
       0.1,
-      400,
+      3200,
     );
     this.camera.rotation.order = 'YXZ';
     this.camera.position.set(0, PLAYER_EYE_HEIGHT, 12);

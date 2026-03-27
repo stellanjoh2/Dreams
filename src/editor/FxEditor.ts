@@ -19,6 +19,9 @@ type SliderConfig = {
     | 'atmosphere.hemiIntensity'
     | 'atmosphere.sunGlow'
     | 'atmosphere.sunTemperature'
+    | 'atmosphere.sunAzimuthDegrees'
+    | 'atmosphere.sunDiscScale'
+    | 'atmosphere.sunTimeOfDayHours'
     | 'fresnel.strength'
     | 'fresnel.radius'
     | 'movement.walkSpeed'
@@ -160,11 +163,35 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
       },
       { key: 'atmosphere.sunGlow', label: 'Sun Glow', min: 0.2, max: 2.5, step: 0.01 },
       {
+        key: 'atmosphere.sunTimeOfDayHours',
+        label: 'Time of day (h) — 12 = noon zenith',
+        min: 0,
+        max: 24,
+        step: 0.05,
+        format: (value) => value.toFixed(2),
+      },
+      {
         key: 'atmosphere.sunTemperature',
-        label: 'Sun temperature (cool → warm)',
+        label: 'Warmth bias (0.5 = time only)',
         min: 0,
         max: 1,
         step: 0.01,
+        format: (value) => value.toFixed(2),
+      },
+      {
+        key: 'atmosphere.sunAzimuthDegrees',
+        label: 'Sun direction (orbit °)',
+        min: 0,
+        max: 360,
+        step: 1,
+        format: (value) => `${Math.round(value)}°`,
+      },
+      {
+        key: 'atmosphere.sunDiscScale',
+        label: 'Sun disc scale',
+        min: 0.2,
+        max: 3.5,
+        step: 0.02,
         format: (value) => value.toFixed(2),
       },
     ],

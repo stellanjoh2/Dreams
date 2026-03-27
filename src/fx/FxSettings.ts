@@ -12,10 +12,19 @@ export interface AtmosphereSettings {
   hemiIntensity: number;
   sunGlow: number;
   /**
-   * 0 = cool (blue-white sun + key), 0.5 ≈ previous default, 1 = warm (golden / sunset).
-   * Drives directional `sunLight` color, the visible sun sphere, and lens-flare tint.
+   * Warmth bias blended with the time-of-day curve: 0.5 = use elevation only; lower = cooler,
+   * higher = warmer on top of automatic zenith→horizon coloring.
    */
   sunTemperature: number;
+  /** 24h clock; 12 = solar noon (max height), 6 & 18 = horizon, 0 = midnight below. */
+  sunTimeOfDayHours: number;
+  /**
+   * Orbits sun disc + directional key around the map (degrees, CCW from above).
+   * 0 = legacy compass; 360 wraps.
+   */
+  sunAzimuthDegrees: number;
+  /** Multiplies the visible sun sphere scale (directional light / lens flare unaffected). */
+  sunDiscScale: number;
 }
 
 export interface CameraFeelSettings {
