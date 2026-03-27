@@ -253,7 +253,7 @@ export class App {
       }
     }
 
-    /** Walking / first-person in the world (sword visible); pointer lock only gates attacks. */
+    /** In-world first person (sword can be drawn); pointer lock only gates attacks. */
     const firstPersonWorld = combatUiOk && !this.freeFlightActive;
     const combatActive = this.cameraSystem.locked && firstPersonWorld;
     if (this.input.consumeToggleWeaponHidden()) {
@@ -323,9 +323,10 @@ export class App {
       appendJumpPadFlareCandidates(emissiveFlareScratch);
       this.crystalSystem.appendFlareCandidates(emissiveFlareScratch);
     }
+    this.world.getSunWorldPosition(this.sunPosition);
     this.lensFlare?.update(
       this.cameraSystem.camera,
-      this.world.getSunWorldPosition(this.sunPosition),
+      this.sunPosition,
       width,
       height,
       delta,
@@ -333,7 +334,6 @@ export class App {
     );
     let lensDirtSunBoost = this.lensFlare?.getSunFlareVisibility() ?? 0;
     if (this.cameraSystem && this.world) {
-      this.world.getSunWorldPosition(this.sunPosition);
       this.cameraSystem.camera.getWorldDirection(this.cameraForward);
       this.sunDirectionFromCam.subVectors(this.sunPosition, this.cameraSystem.camera.position);
       if (this.sunDirectionFromCam.lengthSq() > 1e-4) {

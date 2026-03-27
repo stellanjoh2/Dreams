@@ -61,8 +61,8 @@ export class SwordCombatView {
   private animTime = 0;
   /** ±1 per swing: alternates slash direction for bigger, varied arcs. */
   private swingDir = 1;
-  /** Holstered: no draw, no attacks (toggle H / gamepad Y). */
-  private weaponHidden = false;
+  /** Sheathed by default; press H / gamepad Y to draw or put away. While hidden, no attacks. */
+  private weaponHidden = true;
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.holder = new THREE.Group();

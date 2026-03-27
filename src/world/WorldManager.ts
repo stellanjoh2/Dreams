@@ -78,13 +78,14 @@ export class WorldManager {
   private static readonly SUN_MESH_BASE_SCALE = 1.24;
   /** World-space radius of the sun sphere (only geometry; halo comes from bloom). */
   private static readonly SUN_CORE_RADIUS = 34;
-
   /** Cool / neutral / warm for `sunTemperature` 0 → 0.5 → 1 (piecewise lerp). */
   private static readonly SUN_TEMP_LIGHT_COOL = /* @__PURE__ */ new THREE.Color('#8ec8ff');
-  private static readonly SUN_TEMP_LIGHT_NEUTRAL = /* @__PURE__ */ new THREE.Color('#ffb060');
+  /** Default “day” key — soft beige, not pure white (pairs with HDR sun disc). */
+  private static readonly SUN_TEMP_LIGHT_NEUTRAL = /* @__PURE__ */ new THREE.Color('#e8c9a8');
   private static readonly SUN_TEMP_LIGHT_WARM = /* @__PURE__ */ new THREE.Color('#ff5a18');
   private static readonly SUN_TEMP_HDR_COOL = /* @__PURE__ */ new THREE.Vector3(2.35, 2.95, 3.55);
-  private static readonly SUN_TEMP_HDR_NEUTRAL = /* @__PURE__ */ new THREE.Vector3(3.4, 3.15, 2.95);
+  /** Beige-hot disc: R > G > B so bloom still reads warm vs chalk white. */
+  private static readonly SUN_TEMP_HDR_NEUTRAL = /* @__PURE__ */ new THREE.Vector3(3.28, 2.96, 2.42);
   private static readonly SUN_TEMP_HDR_WARM = /* @__PURE__ */ new THREE.Vector3(3.75, 2.65, 2.05);
   private static readonly sunTempHdrScratch = new THREE.Vector3();
   /**
@@ -255,7 +256,6 @@ export class WorldManager {
       const pulse = 1 + Math.sin(elapsed * 0.45) * 0.03;
       this.sunGroup.scale.setScalar(WorldManager.SUN_MESH_BASE_SCALE * pulse);
     }
-
     this.ambientDust.update(elapsed, camera);
     this.fishSchools.update(delta, elapsed);
     this.orbitingUfo.update(delta, elapsed);
@@ -421,11 +421,12 @@ export class WorldManager {
     this.sunLightTarget.position.copy(this.sunTargetPosition);
     this.scene.add(this.sunLightTarget);
     this.sunLight.target = this.sunLightTarget;
-    this.syncSunLighting();
 
     this.coolLight = new THREE.PointLight('#8ebeff', 1.8, 140, 2);
     this.coolLight.position.set(22, 12, 16);
     this.scene.add(this.coolLight);
+
+    this.syncSunLighting();
   }
 
   /**

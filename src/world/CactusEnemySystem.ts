@@ -35,6 +35,16 @@ const CACTUS_SPAWN_HINT_Z = 12;
 const ALBEDO_BRIGHTNESS_MULT = 1.25;
 
 /**
+ * Readable spec / sun glints without chrome: tighter roughness + modest metalness + clearcoat.
+ * GLB is often `MeshStandardMaterial` only — we upgrade to Physical in `sanitizeCactusShading` so clearcoat runs.
+ */
+const CACTUS_ROUGHNESS = 0.48;
+const CACTUS_METALNESS = 0.11;
+const CACTUS_CLEARCOAT = 0.42;
+const CACTUS_CLEARCOAT_ROUGHNESS = 0.3;
+const CACTUS_SPECULAR_INTENSITY = 1.28;
+
+/**
  * Model “face” is opposite Three’s lookAt (−Z) axis — add π so he faces the player, not away.
  */
 const CACTUS_MODEL_YAW_OFFSET = Math.PI;
@@ -82,8 +92,8 @@ function stripNormalLikeMaps(material: THREE.Material): void {
 }
 
 /**
- * Cactus: **base color (`map`) only** at runtime. The GLB may still embed ORM/normal/etc.; we strip
- * every other texture slot and reset PBR extras so lighting uses vertex normals + albedo only.
+ * Cactus: **base color (`map`) only** at runtime; ORM/normal maps stripped. Upgrades Standard → Physical
+ * so clearcoat + specular read clearly under the directional sun.
  */
 function sanitizeCactusShading(root: THREE.Object3D): void {
   root.traverse((child) => {
@@ -110,13 +120,28 @@ function sanitizeCactusShading(root: THREE.Object3D): void {
       }
     }
 
-    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const materials = mesh.material;
+    const multiMat = Array.isArray(materials);
+    const slotCount = multiMat ? materials.length : 1;
 
-    for (const material of mats) {
+    for (let mi = 0; mi < slotCount; mi++) {
+      let material: THREE.Material = multiMat ? materials[mi]! : materials;
       stripNormalLikeMaps(material);
 
       if (!(material instanceof THREE.MeshStandardMaterial)) {
         continue;
+      }
+
+      if (!(material instanceof THREE.MeshPhysicalMaterial)) {
+        const phys = new THREE.MeshPhysicalMaterial();
+        phys.copy(material);
+        phys.name = material.name;
+        if (multiMat) {
+          (materials as THREE.Material[])[mi] = phys;
+        } else {
+          mesh.material = phys;
+        }
+        material = phys;
       }
 
       const mat = material as THREE.MeshPhysicalMaterial;
@@ -138,37 +163,35 @@ function sanitizeCactusShading(root: THREE.Object3D): void {
       mat.displacementScale = 0;
       mat.displacementBias = 0;
 
-      mat.roughness = 1;
-      mat.metalness = 0;
+      mat.roughness = CACTUS_ROUGHNESS;
+      mat.metalness = CACTUS_METALNESS;
 
-      if (mat instanceof THREE.MeshPhysicalMaterial) {
-        mat.transmission = 0;
-        mat.transmissionMap = null;
-        mat.thickness = 0;
-        mat.thicknessMap = null;
-        mat.ior = 1;
-        mat.clearcoat = 0;
-        mat.clearcoatMap = null;
-        mat.clearcoatRoughness = 0;
-        mat.clearcoatNormalMap = null;
-        mat.sheen = 0;
-        mat.sheenColorMap = null;
-        mat.sheenRoughnessMap = null;
-        mat.iridescence = 0;
-        mat.iridescenceMap = null;
-        mat.iridescenceThicknessMap = null;
-        mat.specularIntensity = 1;
-        mat.specularColor.setHex(0xffffff);
-        mat.anisotropy = 0;
-        const phys = mat as THREE.MeshPhysicalMaterial & {
-          specularIntensityMap?: THREE.Texture | null;
-          specularColorMap?: THREE.Texture | null;
-          anisotropyMap?: THREE.Texture | null;
-        };
-        phys.specularIntensityMap = null;
-        phys.specularColorMap = null;
-        phys.anisotropyMap = null;
-      }
+      mat.transmission = 0;
+      mat.transmissionMap = null;
+      mat.thickness = 0;
+      mat.thicknessMap = null;
+      mat.ior = 1;
+      mat.clearcoat = CACTUS_CLEARCOAT;
+      mat.clearcoatMap = null;
+      mat.clearcoatRoughness = CACTUS_CLEARCOAT_ROUGHNESS;
+      mat.clearcoatNormalMap = null;
+      mat.sheen = 0;
+      mat.sheenColorMap = null;
+      mat.sheenRoughnessMap = null;
+      mat.iridescence = 0;
+      mat.iridescenceMap = null;
+      mat.iridescenceThicknessMap = null;
+      mat.specularIntensity = CACTUS_SPECULAR_INTENSITY;
+      mat.specularColor.setHex(0xffffff);
+      mat.anisotropy = 0;
+      const phys = mat as THREE.MeshPhysicalMaterial & {
+        specularIntensityMap?: THREE.Texture | null;
+        specularColorMap?: THREE.Texture | null;
+        anisotropyMap?: THREE.Texture | null;
+      };
+      phys.specularIntensityMap = null;
+      phys.specularColorMap = null;
+      phys.anisotropyMap = null;
 
       mat.polygonOffset = true;
       mat.polygonOffsetFactor = 0.5;
