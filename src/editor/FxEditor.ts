@@ -1,4 +1,4 @@
-import type { FxSettings } from '../fx/FxSettings';
+import { FX_SETTINGS_STORAGE_KEY, type FxSettings } from '../fx/FxSettings';
 
 type SliderConfig = {
   key:
@@ -348,6 +348,8 @@ export class FxEditor {
   private readonly settings: FxSettings;
   private readonly onChange: (settings: FxSettings) => void;
   private readonly onReset: () => void;
+  private readonly copySettingsButton: HTMLButtonElement;
+  private copyFeedbackTimer = 0;
   private open = false;
 
   constructor(
@@ -367,13 +369,17 @@ export class FxEditor {
       <p>Hidden editor for tuning bloom, atmosphere, and first-person feel while you walk the world.</p>
       <div class="editor-grid"></div>
       <div class="editor-footer">
-        <span>Changes save automatically in this browser.</span>
-        <button class="start-button" type="button">Reset Look</button>
+        <span class="editor-footer-hint">Changes save automatically in this browser.</span>
+        <div class="editor-footer-actions">
+          <button class="start-button editor-copy-settings" type="button">Copy settings</button>
+          <button class="start-button" type="button" data-editor-reset>Reset Look</button>
+        </div>
       </div>
     `;
 
     const grid = this.panel.querySelector<HTMLDivElement>('.editor-grid')!;
-    const resetButton = this.panel.querySelector<HTMLButtonElement>('.start-button')!;
+    this.copySettingsButton = this.panel.querySelector<HTMLButtonElement>('.editor-copy-settings')!;
+    const resetButton = this.panel.querySelector<HTMLButtonElement>('button[data-editor-reset]')!;
 
     const perfSection = document.createElement('section');
     perfSection.className = 'editor-group';
@@ -567,8 +573,63 @@ export class FxEditor {
     waterColorSection.append(waterColorTitle, waterColorField);
     grid.append(waterColorSection);
 
+    this.copySettingsButton.addEventListener('click', () => {
+      this.copySettingsToClipboard();
+    });
     resetButton.addEventListener('click', () => this.onReset());
     mount.append(this.panel);
+  }
+
+  /**
+   * Copies full FX settings as JSON (for sharing / asking to update `DEFAULT_FX_SETTINGS`).
+   */
+  private copySettingsToClipboard(): void {
+    const payload = {
+      candyLandsFxExport: {
+        version: 1,
+        storageKey: FX_SETTINGS_STORAGE_KEY,
+        exportedAt: new Date().toISOString(),
+        hint: 'Paste into chat to update defaults or reproduce this look in code.',
+      },
+      settings: structuredClone(this.settings),
+    };
+    const text = JSON.stringify(payload, null, 2);
+
+    const flashCopied = (): void => {
+      const btn = this.copySettingsButton;
+      const prev = btn.textContent ?? 'Copy settings';
+      btn.textContent = 'Copied!';
+      window.clearTimeout(this.copyFeedbackTimer);
+      this.copyFeedbackTimer = window.setTimeout(() => {
+        btn.textContent = prev;
+      }, 2000);
+    };
+
+    const tryFallback = (): boolean => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.append(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        return ok;
+      } catch {
+        return false;
+      }
+    };
+
+    if (navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(text).then(flashCopied).catch(() => {
+        if (tryFallback()) {
+          flashCopied();
+        }
+      });
+    } else if (tryFallback()) {
+      flashCopied();
+    }
   }
 
   toggle(): void {

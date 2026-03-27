@@ -658,8 +658,21 @@ a {
   gap: 0.75rem;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
   font-size: 0.76rem;
   color: rgba(248, 241, 255, 0.62);
+}
+
+.editor-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.editor-footer-hint {
+  flex: 1 1 12rem;
+  min-width: 0;
 }
 
 @media (max-width: 900px) {
