@@ -5,6 +5,8 @@ import { getBackdropFarFrameMetrics } from './DistantWorldBackdrop';
 import { BLOCK_UNIT, RESPAWN_ANCHORS } from './TerrainLayout';
 import {
   MOUNTAIN_BASE_TARGET_EXTENT,
+  MOUNTAIN_MESH_HEIGHT_SCALE,
+  MOUNTAIN_MESH_UNIFORM_SCALE,
   MOUNTAIN_ORBIT_MARGIN_BLOCKS,
   MOUNTAIN_SPAWN_EXTRA_MARGIN_BLOCKS,
 } from './worldHorizon';
@@ -137,6 +139,17 @@ function normalizeMountainToGround(model: THREE.Object3D, targetMaxExtent: numbe
   model.position.y -= sinkY;
 }
 
+/** Re-seat lowest point after non-uniform scale (keeps mesh embedded in ground). */
+function snapMountainFeetToLocalGround(model: THREE.Object3D, sinkY: number): void {
+  model.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(model);
+  if (box.isEmpty()) {
+    return;
+  }
+  model.position.y -= box.min.y;
+  model.position.y -= sinkY;
+}
+
 function angleJitter(i: number): number {
   const t = Math.sin(i * 19.231 + ANGLE_JITTER_SEED) * 43758.5453123;
   const f = t - Math.floor(t);
@@ -201,6 +214,9 @@ export class MountainBackdropProp {
             BASE_TARGET_MAX_EXTENT * sizeMul,
             BASE_SINK_INTO_GROUND,
           );
+          mountain.scale.multiplyScalar(MOUNTAIN_MESH_UNIFORM_SCALE);
+          mountain.scale.y *= MOUNTAIN_MESH_HEIGHT_SCALE;
+          snapMountainFeetToLocalGround(mountain, BASE_SINK_INTO_GROUND);
           applyMountainShadowFlags(mountain);
           tuneMountainMaterials(mountain);
 

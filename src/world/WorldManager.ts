@@ -12,8 +12,8 @@ import {
   FISHING_BOAT_PLACEMENT_RIGHT,
 } from './FishingBoatProp';
 import { FloatingBarrelsProp } from './FloatingBarrelsProp';
-import { MountainBackdropProp } from './MountainBackdropProp';
 import { DistantPlanetsBackdrop, getSunAnchorHorizonDistanceWorld } from './DistantPlanetsBackdrop';
+import { MountainBackdropProp } from './MountainBackdropProp';
 import { ButterflyScatterSystem } from './ButterflyScatterSystem';
 import { WaterEdgeGrassScatter } from './WaterEdgeGrassScatter';
 import { SeaFloorRocksScatter } from './SeaFloorRocksScatter';
@@ -153,8 +153,8 @@ export class WorldManager {
   private readonly fishingBoatRight = new FishingBoatProp(this.worldRoot, FISHING_BOAT_PLACEMENT_RIGHT);
   private readonly fishingBoatLeft = new FishingBoatProp(this.worldRoot, FISHING_BOAT_PLACEMENT_LEFT);
   private readonly floatingBarrels = new FloatingBarrelsProp(this.worldRoot);
-  private readonly mountainBackdrop = new MountainBackdropProp(this.worldRoot);
   private readonly distantPlanets = new DistantPlanetsBackdrop(this.worldRoot);
+  private readonly mountainBackdrop = new MountainBackdropProp(this.worldRoot);
   private readonly terrain = new TerrainGenerator();
   /** Terrain `createGround` root — sea bed, water, platforms (rocks parent here for correct depth order). */
   private terrainRootGroup: THREE.Group | null = null;
@@ -253,8 +253,8 @@ export class WorldManager {
     this.fishingBoatRight.load();
     this.fishingBoatLeft.load();
     this.floatingBarrels.load();
-    this.mountainBackdrop.load();
     this.distantPlanets.load();
+    this.mountainBackdrop.load();
     this.orbitingUfo.load();
     this.seedDecorOccupancyFromWorldProps();
     this.worldRoot.add(this.plantScatterRoot);
