@@ -1,4 +1,4 @@
-import type { Material } from 'three';
+import type { Color, Material, Side, Texture } from 'three';
 
 declare module 'three/webgpu' {
   import type { WebGLRenderer } from 'three';
@@ -17,10 +17,26 @@ declare module 'three/webgpu' {
     dispose(): void;
   }
 
-  /** Node material used when rendering `MeshBasicMaterial` on WebGPU. */
+  /**
+   * Node material used when rendering `MeshBasicMaterial` on WebGPU.
+   * Carries the same fields as `MeshBasicMaterial` after `setDefaultValues`.
+   */
   export class MeshBasicNodeMaterial extends Material {
     fog: boolean;
     colorNode: unknown;
+    color: Color;
+    map: Texture | null;
+    alphaMap: Texture | null;
+    alphaTest: number;
+    vertexColors: boolean;
+    wireframe: boolean;
+    side: Side;
+    transparent: boolean;
+    opacity: number;
+    depthWrite: boolean;
+    depthTest: boolean;
+    /** When false, output is diffuse only (good for debug “unlit” albedo). */
+    lights: boolean;
     constructor(parameters?: { fog?: boolean });
   }
 }

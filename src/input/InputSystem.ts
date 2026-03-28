@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { DevRenderMode } from '../debug/DevRenderMode';
 import type { GamepadSettings } from '../fx/FxSettings';
 import { GamepadController } from './GamepadController';
 
@@ -14,6 +15,7 @@ export class InputSystem {
   private toggleWeaponHiddenQueued = false;
   private toggleFreeFlightQueued = false;
   private toggleEditorQueued = false;
+  private devRenderModeQueued: DevRenderMode | null = null;
 
   private readonly keyboardMove = new THREE.Vector2();
   private gamepadMove = new THREE.Vector2();
@@ -167,6 +169,12 @@ export class InputSystem {
     return value;
   }
 
+  consumeDevRenderMode(): DevRenderMode | null {
+    const mode = this.devRenderModeQueued;
+    this.devRenderModeQueued = null;
+    return mode;
+  }
+
   private handleKeyDown(event: KeyboardEvent): void {
     this.pressedKeys.add(event.code);
 
@@ -203,6 +211,16 @@ export class InputSystem {
       if (!this.shouldIgnoreGameKeyTarget(event.target)) {
         event.preventDefault();
         this.toggleFreeFlightQueued = true;
+      }
+    }
+
+    if (!event.repeat && !this.shouldIgnoreGameKeyTarget(event.target)) {
+      if (event.code === 'Digit1') {
+        this.devRenderModeQueued = 'normal';
+      } else if (event.code === 'Digit2') {
+        this.devRenderModeQueued = 'unlit';
+      } else if (event.code === 'Digit3') {
+        this.devRenderModeQueued = 'wireframe';
       }
     }
   }

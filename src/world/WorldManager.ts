@@ -31,6 +31,7 @@ import {
   addSurfaceGridKeysForFootprint,
   BLOCK_UNIT,
   CRYSTAL_ANCHORS,
+  CRYSTAL_INSTANCE_SCALE,
   DECOR_ANCHORS,
   JUMP_PADS,
   MOVING_ELEVATORS,
@@ -38,9 +39,11 @@ import {
   RESPAWN_ANCHORS,
   surfaceGridKeyFromTile,
   surfaceGridKeyFromWorldXZ,
+  surfaceTileFacesOpenPerimeter,
 } from './TerrainLayout';
 import type { CrystalInstance } from '../systems/CrystalSystem';
 import { publicUrl } from '../config/publicUrl';
+import { loadCrystalPickupGeometryFromGlb } from './crystalPickupMesh';
 
 type GroundScatterPlacement = {
   variantIndex: number;
@@ -66,6 +69,13 @@ type CuratedPlantProfile = {
   scale: number;
   /** Tall plants are normally off-route only; set true so this variant also scatters on spawn/path. */
   scatterOnRoute?: boolean;
+  /** Skip tiles that border open water — keeps tall variants on interior land only. */
+  landInteriorOnly?: boolean;
+  /**
+   * How many times this variant is repeated in the round-robin pool (default 1). Lower = rarer vs siblings
+   * (e.g. cyan `candy-shrub-a` clusters vs other land plants).
+   */
+  scatterPoolCopies?: number;
 };
 
 export class WorldManager {
@@ -132,14 +142,16 @@ export class WorldManager {
   private static readonly CURATED_PLANT_PROFILES: readonly CuratedPlantProfile[] = [
     { url: publicUrl('plants/curated/candy-bloom-a.glb'), bucket: 'balanced', scale: 1.18 },
     { url: publicUrl('plants/curated/candy-bloom-b.glb'), bucket: 'balanced', scale: 1.08 },
-    { url: publicUrl('plants/curated/candy-shrub-a.glb'), bucket: 'balanced', scale: 1.12 },
-    { url: publicUrl('plants/curated/candy-shrub-b.glb'), bucket: 'balanced', scale: 1.04 },
+    /** Cyan glowing clusters — keep rare vs shrubs / blooms. */
+    { url: publicUrl('plants/curated/candy-shrub-a.glb'), bucket: 'balanced', scale: 1.12, scatterPoolCopies: 1 },
+    { url: publicUrl('plants/curated/candy-shrub-b.glb'), bucket: 'balanced', scale: 1.04, scatterPoolCopies: 4 },
     // Purple spike only for tall bucket (replaces spike-a / spike-b); allowed on main path so it shows on the map.
     {
       url: publicUrl('plants/curated/candy-spike-purple.glb'),
       bucket: 'tall',
       scale: 0.96,
       scatterOnRoute: true,
+      landInteriorOnly: true,
     },
   ];
 
@@ -161,6 +173,8 @@ export class WorldManager {
   private readonly terrainPhysics = new TerrainPhysics();
   private readonly cactusEnemies: CactusEnemySystem;
   private readonly plantLoader = new GLTFLoader();
+
+  private static readonly CRYSTAL_PICKUP_GLB = publicUrl('assets/game_ready_low_poly_crystal.glb');
   private readonly butterflyScatter: ButterflyScatterSystem;
   private readonly waterEdgeGrass: WaterEdgeGrassScatter;
   private readonly seaFloorRocks: SeaFloorRocksScatter;
@@ -271,9 +285,26 @@ export class WorldManager {
     return this.decorOccupiedSurfaceKeys;
   }
 
-  /** Shared octahedron used by crystal instances — safe for transient pickup dissolve meshes. */
+  /** Shared mesh used by crystal instances — safe for transient pickup dissolve meshes. */
   getCrystalGeometry(): THREE.BufferGeometry {
     return this.props.getCrystalGeometry();
+  }
+
+  /**
+   * Load authored crystal GLB before `build()` so instanced pickups use that mesh at the same scales.
+   */
+  async loadCrystalPickupMesh(): Promise<void> {
+    const ref = this.props.getCrystalGeometry();
+    try {
+      const geo = await loadCrystalPickupGeometryFromGlb(
+        this.plantLoader,
+        WorldManager.CRYSTAL_PICKUP_GLB,
+        ref,
+      );
+      this.props.setCrystalPickupGeometry(geo);
+    } catch (err) {
+      console.warn('[WorldManager] Crystal GLB missing or invalid — procedural crystal', err);
+    }
   }
 
   /**
@@ -987,6 +1018,10 @@ export class WorldManager {
         variant.userData.plantBucket = result.profile.bucket;
         variant.userData.plantScaleMultiplier = result.profile.scale;
         variant.userData.scatterOnRoute = result.profile.scatterOnRoute === true;
+        variant.userData.landInteriorOnly = result.profile.landInteriorOnly === true;
+        if (typeof result.profile.scatterPoolCopies === 'number') {
+          variant.userData.scatterPoolCopies = result.profile.scatterPoolCopies;
+        }
         return [variant];
       });
 
@@ -1009,14 +1044,29 @@ export class WorldManager {
     return meshes;
   }
 
+  /** Repeat variant indices for weighted round-robin scatter (see `scatterPoolCopies` on profiles). */
+  private static expandScatterPool(variants: THREE.Object3D[], indices: number[]): number[] {
+    const out: number[] = [];
+    for (const i of indices) {
+      const raw = variants[i]?.userData.scatterPoolCopies;
+      const n =
+        typeof raw === 'number' && Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 1;
+      for (let k = 0; k < n; k += 1) {
+        out.push(i);
+      }
+    }
+    return out;
+  }
+
   private populatePlantScatter(variants: THREE.Object3D[]): void {
-    const routeVariantIndices: number[] = [];
+    const routeBase: number[] = [];
     for (let i = 0; i < variants.length; i += 1) {
       const variant = variants[i];
       if (variant.userData.plantBucket !== 'tall' || variant.userData.scatterOnRoute === true) {
-        routeVariantIndices.push(i);
+        routeBase.push(i);
       }
     }
+    const routeVariantIndices = WorldManager.expandScatterPool(variants, routeBase);
 
     this.populateInstancedGroundScatter(
       variants,
@@ -1044,7 +1094,10 @@ export class WorldManager {
       return;
     }
 
-    const allVariantIndices = variants.map((_, index) => index);
+    const allVariantIndices = WorldManager.expandScatterPool(
+      variants,
+      variants.map((_, index) => index),
+    );
     let routeVariantCursor = 0;
     let offRouteVariantCursor = 0;
 
@@ -1077,7 +1130,13 @@ export class WorldManager {
       }
 
       const useRoutePool = tile.role === 'spawn' || tile.role === 'path';
-      const pool = useRoutePool ? routeVariantIndices : allVariantIndices;
+      let pool = useRoutePool ? routeVariantIndices : allVariantIndices;
+      if (surfaceTileFacesOpenPerimeter(tile)) {
+        const filtered = pool.filter((vi) => !variants[vi].userData.landInteriorOnly);
+        if (filtered.length > 0) {
+          pool = filtered;
+        }
+      }
       if (pool.length === 0) {
         continue;
       }
@@ -1385,7 +1444,7 @@ export class WorldManager {
 
       this.crystalLayoutDummy.position.copy(basePosition);
       this.crystalLayoutDummy.rotation.set(0, index * 0.73, 0);
-      this.crystalLayoutDummy.scale.set(0.58, 0.92, 0.58);
+      this.crystalLayoutDummy.scale.set(...CRYSTAL_INSTANCE_SCALE);
       this.crystalLayoutDummy.updateMatrix();
       instancedMesh.setMatrixAt(instanceIndex, this.crystalLayoutDummy.matrix);
 

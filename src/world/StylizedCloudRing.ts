@@ -18,11 +18,11 @@ const RING_OUTER = BLOCK_UNIT * 68;
 const ORBIT_CLEARANCE_BEYOND_PLAYFIELD = BLOCK_UNIT * 28;
 
 /**
- * Vertical band above highest platform top — kept **high** so ring clouds clear bg mountain silhouettes
- * (same XZ orbit as before; altitude was raised vs the pre-mountain era).
+ * Vertical band above highest platform top. Tuned ~50% lower than the mountain-clearance era so the
+ * ring sits nearer the play volume / UFO band (same XZ orbit).
  */
-const HEIGHT_MIN_ABOVE_TOP = BLOCK_UNIT * 46;
-const HEIGHT_MAX_ABOVE_TOP = BLOCK_UNIT * 74;
+const HEIGHT_MIN_ABOVE_TOP = BLOCK_UNIT * 23;
+const HEIGHT_MAX_ABOVE_TOP = BLOCK_UNIT * 37;
 
 /** After normalization each cloud is roughly this big (world units, max axis). */
 const CLOUD_TARGET_SIZE = BLOCK_UNIT * 22;

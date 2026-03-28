@@ -42,6 +42,7 @@ type SliderConfig = {
     | 'water.waveHeight'
     | 'water.flowSpeed'
     | 'water.foamIntensity'
+    | 'water.foamObjectRadius'
     | 'water.normalDistort'
     | 'water.opacity'
     | 'lensDirt.strength'
@@ -264,11 +265,19 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
       },
       {
         key: 'water.foamIntensity',
-        label: 'Shore foam',
+        label: 'Foam brightness',
         min: 0,
         max: 1.2,
         step: 0.01,
         format: (value) => value.toFixed(2),
+      },
+      {
+        key: 'water.foamObjectRadius',
+        label: 'Object foam radius',
+        min: 0.0001,
+        max: 0.08,
+        step: 0.0001,
+        format: (value) => value.toFixed(4),
       },
       {
         key: 'water.normalDistort',

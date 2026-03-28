@@ -19,6 +19,7 @@ import { FxEditor } from '../editor/FxEditor';
 import { appendJumpPadFlareCandidates } from '../fx/emissiveFlareSources';
 import { LensFlareOverlay, type LensFlareEmissiveCandidate } from '../fx/LensFlareOverlay';
 import { SwordCombatView } from '../combat/SwordCombatView';
+import { applyDevRenderMode, type DevRenderMode } from '../debug/DevRenderMode';
 
 const emissiveFlareScratch: LensFlareEmissiveCandidate[] = [];
 
@@ -43,6 +44,8 @@ export class App {
   private swordCombat?: SwordCombatView;
   /** Detached fly cam; player frozen until toggled off (F / gamepad RS click). */
   private freeFlightActive = false;
+  /** 1: normal; 2: unlit; 3: wireframe. Bypasses post when not normal (WebGPU needs NodeMaterials for overrides). */
+  private devRenderMode: DevRenderMode = 'normal';
 
   private lastFrame = 0;
   private readonly cameraPosition = new THREE.Vector3();
@@ -91,6 +94,7 @@ export class App {
       console.warn('[App] Could not load textures/water_hf_normal.png — procedural water normals');
     }
 
+    await this.world.loadCrystalPickupMesh();
     const crystals = this.world.build(this.settings, waterHfNormal);
     await this.world.loadCloudPack();
     await this.world.loadDecorScatter();
@@ -246,6 +250,12 @@ export class App {
 
     this.input.update();
 
+    const devMode = this.input.consumeDevRenderMode();
+    if (devMode) {
+      this.devRenderMode = devMode;
+      applyDevRenderMode(this.world.scene, devMode);
+    }
+
     const combatUiOk = !this.editor?.isOpen;
     if (this.input.consumeToggleFreeFlight()) {
       if (combatUiOk) {
@@ -350,7 +360,10 @@ export class App {
     const sunGeomOcc = this.lensFlare?.getSunGeometryOcclusion01() ?? 0;
     this.postProcessing?.syncDynamicExposure(this.settings.exposure, sunElev, sunGeomOcc);
     this.rendererCore.prepareFrame();
-    if (this.postProcessing) {
+    const useDirectSceneRender = this.devRenderMode !== 'normal';
+    if (useDirectSceneRender) {
+      this.rendererCore.renderer.render(this.world.scene, this.cameraSystem.camera);
+    } else if (this.postProcessing) {
       this.postProcessing.render();
     } else {
       this.rendererCore.renderer.render(this.world.scene, this.cameraSystem.camera);
@@ -425,6 +438,12 @@ export class App {
         merged.atmosphere.sunTimeOfDayHours = fresh.atmosphere.sunTimeOfDayHours;
       } else {
         merged.atmosphere.sunTimeOfDayHours = THREE.MathUtils.euclideanModulo(sunH, 24);
+      }
+      const foamR = Number(merged.water.foamObjectRadius);
+      if (!Number.isFinite(foamR)) {
+        merged.water.foamObjectRadius = fresh.water.foamObjectRadius;
+      } else {
+        merged.water.foamObjectRadius = THREE.MathUtils.clamp(foamR, 0.0001, 0.12);
       }
       return merged;
     } catch {

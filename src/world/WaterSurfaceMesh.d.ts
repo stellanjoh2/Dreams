@@ -16,7 +16,7 @@ export type WaterSurfaceMeshOptions = {
   normalStrength?: number;
   /** Tiling tangent-space PNG normal maps (RGB); procedural water uses false. */
   standardNormalUnpack?: boolean;
-  /** Depth-buffer foam: linear-depth ramp width; small = thin rim (typ. 0.005–0.014). */
+  /** Depth-buffer foam: linear-depth ramp width; tune via FX `water.foamObjectRadius` (typ. 0.012–0.04). */
   foamDepthWidth?: number;
   /** Max blend toward foam white (0–1). */
   foamIntensity?: number;

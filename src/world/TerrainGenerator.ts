@@ -2,11 +2,12 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { WaterSurfaceMesh } from './WaterSurfaceMesh.js';
 import { BLOCK_UNIT, JUMP_PADS, MOVING_ELEVATORS, PLATFORM_TILES, getMovingElevatorTopY } from './TerrainLayout';
-import { SEA_BED_SURFACE_Y, WATER_SURFACE_Y } from '../config/defaults';
+import { DEFAULT_FX_SETTINGS, SEA_BED_SURFACE_Y, WATER_SURFACE_Y } from '../config/defaults';
 import { publicUrl } from '../config/publicUrl';
 import type { WaterFxSettings } from '../fx/FxSettings';
 import { createMetallicFlakeOrmTexture } from '../materials/MetallicFlakeDetail';
 import { getSeaBedRadiusWorld, getWaterSurfaceRadiusWorld } from './worldHorizon';
+import { gerstnerDisplacement } from './waterGerstner';
 
 const TILE_RENDER_SCALE = BLOCK_UNIT * 1.02;
 const metallicFlakeDetail = createMetallicFlakeOrmTexture(6);
@@ -16,97 +17,6 @@ const WATER_DISK_THETA = 112;
 const WATER_DISK_PHI = 52;
 /** Avoid a visible hole at origin; ~1 mm in world units. */
 const WATER_DISK_INNER_EPS = 0.001;
-
-/**
- * Multi-component Gerstner (trochoidal) displacement on the water disk.
- * Resting grid (local X,Y in ring plane; displacement along local Z → world up after mesh Rx(-π/2)).
- * See [trochoidal / Gerstner waves](https://en.wikipedia.org/wiki/Trochoidal_wave); CG multi-wave variant
- * as in Tessendorf / common ocean shaders (cf. augmented Gerstner stacks in real-time water).
- */
-const GRAVITY = 9.81;
-
-type GerstnerWaveParams = {
-  /** Horizontal direction (need not be unit — normalized internally). */
-  dirX: number;
-  dirY: number;
-  /** Spatial period (meters). */
-  wavelength: number;
-  /** Vertical amplitude (meters). */
-  amplitude: number;
-  /** 0 = sine in Z only; higher = more horizontal orbital motion (trochoidal pinch / sharper crests). */
-  steepness: number;
-  /** Constant phase offset (radians). */
-  phase: number;
-  /** Multiplier on √(gk) angular frequency (1 ≈ deep-water dispersion). */
-  speedScale: number;
-};
-
-const WATER_GERSTNER_WAVES: readonly GerstnerWaveParams[] = [
-  {
-    dirX: 1,
-    dirY: 0.38,
-    wavelength: 52,
-    amplitude: 0.1,
-    steepness: 0.78,
-    phase: 0.35,
-    speedScale: 0.92,
-  },
-  {
-    dirX: -0.55,
-    dirY: 1,
-    wavelength: 38,
-    amplitude: 0.078,
-    steepness: 0.74,
-    phase: 2.05,
-    speedScale: 1.02,
-  },
-  {
-    dirX: 0.72,
-    dirY: -0.68,
-    wavelength: 29,
-    amplitude: 0.055,
-    steepness: 0.68,
-    phase: 4.2,
-    speedScale: 0.88,
-  },
-  {
-    dirX: 0.22,
-    dirY: 1,
-    wavelength: 67,
-    amplitude: 0.062,
-    steepness: 0.62,
-    phase: 1.45,
-    speedScale: 0.75,
-  },
-];
-
-function gerstnerDisplacement(
-  restX: number,
-  restY: number,
-  t: number,
-  heightMul: number,
-): { dx: number; dy: number; dz: number } {
-  let dx = 0;
-  let dy = 0;
-  let dz = 0;
-
-  for (const w of WATER_GERSTNER_WAVES) {
-    const len = Math.hypot(w.dirX, w.dirY);
-    const Dx = len > 1e-6 ? w.dirX / len : 1;
-    const Dy = len > 1e-6 ? w.dirY / len : 0;
-    const k = (Math.PI * 2) / Math.max(w.wavelength, 0.5);
-    const omega = Math.sqrt(GRAVITY * k) * w.speedScale;
-    const phase = k * (Dx * restX + Dy * restY) - omega * t + w.phase;
-    const s = Math.sin(phase);
-    const c = Math.cos(phase);
-    const horiz = w.steepness * w.amplitude * c;
-    dx += horiz * Dx;
-    dy += horiz * Dy;
-    dz += w.amplitude * s;
-  }
-
-  return { dx: dx * heightMul, dy: dy * heightMul, dz: dz * heightMul };
-}
 
 const createWaterNormalTexture = (phase: number): THREE.DataTexture => {
   const size = 512;
@@ -262,9 +172,8 @@ export class TerrainGenerator {
     );
 
     const foamOpts = {
-      /** Tight rim at geometry/water cut; raise slightly if foam disappears. */
-      foamDepthWidth: 0.0075,
-      foamIntensity: 0.16,
+      foamDepthWidth: DEFAULT_FX_SETTINGS.water.foamObjectRadius,
+      foamIntensity: DEFAULT_FX_SETTINGS.water.foamIntensity,
     };
 
     const waterOptions =
@@ -403,6 +312,7 @@ export class TerrainGenerator {
       normalStrength: { value: number };
       flowSpeed: { value: number };
       foamIntensity: { value: number };
+      foamDepthWidth: { value: number };
       normalDistort: { value: number };
       opacity: { value: number };
     };
@@ -412,7 +322,9 @@ export class TerrainGenerator {
       return;
     }
 
+    const foamR = Number(settings.foamObjectRadius);
     node.color.value.set(settings.color);
+    water.userData.devUnlitWaterColor = new THREE.Color(settings.color);
     node.reflectivity.value = settings.reflectivity;
     node.reflectionStrength.value = settings.reflectionStrength;
     node.reflectionContrast.value = settings.reflectionContrast;
@@ -420,6 +332,9 @@ export class TerrainGenerator {
     node.normalStrength.value = settings.normalStrength;
     node.flowSpeed.value = settings.flowSpeed;
     node.foamIntensity.value = settings.foamIntensity;
+    if (node.foamDepthWidth) {
+      node.foamDepthWidth.value = Number.isFinite(foamR) ? THREE.MathUtils.clamp(foamR, 0.0001, 0.12) : 0.026;
+    }
     node.normalDistort.value = settings.normalDistort;
     if (node.opacity) {
       const o = Number(settings.opacity);

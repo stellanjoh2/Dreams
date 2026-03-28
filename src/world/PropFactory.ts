@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createMetallicFlakeOrmTexture } from '../materials/MetallicFlakeDetail';
+import { CRYSTAL_INSTANCE_SCALE } from './TerrainLayout';
 
 const toColor = (value: string): THREE.Color => new THREE.Color(value);
 const CRYSTAL_ROTATION = new THREE.Matrix4().makeRotationX(Math.PI / 2);
@@ -34,7 +35,7 @@ export class PropFactory {
   private readonly cactusArmGeometry = new THREE.CylinderGeometry(0.22, 0.35, 2.8, 8);
   private readonly treeTrunkGeometry = new THREE.CylinderGeometry(0.24, 0.34, 2.2, 10);
   private readonly treeTopGeometry = new THREE.SphereGeometry(1.2, 28, 22);
-  private readonly crystalGeometry = createCrystalGeometry();
+  private crystalGeometry: THREE.BufferGeometry = createCrystalGeometry();
 
   createCandyRock(color: string, scale: THREE.Vector3Tuple): THREE.Mesh {
     const mesh = new THREE.Mesh(this.candyRockGeometry, this.createCandyMaterial(color));
@@ -109,7 +110,7 @@ export class PropFactory {
 
   createCrystal(color: string): THREE.Mesh {
     const crystal = new THREE.Mesh(this.crystalGeometry, this.getCrystalMaterial(color));
-    crystal.scale.set(0.58, 0.92, 0.58);
+    crystal.scale.set(...CRYSTAL_INSTANCE_SCALE);
     crystal.userData.isCrystal = true;
     this.applyShadowFlags(crystal);
     return crystal;
@@ -118,6 +119,12 @@ export class PropFactory {
   /** Shared geometry for all crystals; use with {@link getCrystalMaterial}. */
   getCrystalGeometry(): THREE.BufferGeometry {
     return this.crystalGeometry;
+  }
+
+  /** Replaces pickup crystal mesh (e.g. from GLB); disposes previous geometry. */
+  setCrystalPickupGeometry(geometry: THREE.BufferGeometry): void {
+    this.crystalGeometry.dispose();
+    this.crystalGeometry = geometry;
   }
 
   getCrystalMaterial(color: string): THREE.MeshPhysicalMaterial {

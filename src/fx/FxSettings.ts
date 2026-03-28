@@ -113,6 +113,11 @@ export interface WaterFxSettings {
   waveHeight: number;
   flowSpeed: number;
   foamIntensity: number;
+  /**
+   * Intersection / “object foam” thickness in **linear depth** space (same units as the water shader’s
+   * depth-difference smoothstep). Higher = wider white band along hulls and props.
+   */
+  foamObjectRadius: number;
   /** UV offset strength for reflection/refraction distortion. */
   normalDistort: number;
   /**

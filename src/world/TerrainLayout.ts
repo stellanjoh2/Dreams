@@ -408,6 +408,28 @@ export const PLATFORM_SURFACE_TILES: PlatformTile[] = (() => {
   return [...map.values()];
 })();
 
+const PLATFORM_SURFACE_GRID_KEYS = new Set(PLATFORM_SURFACE_TILES.map((t) => surfaceGridKeyFromTile(t)));
+
+/**
+ * True when this walkable surface cell borders a grid slot with no platform top (water / void).
+ * Used to keep tall plants (e.g. purple spike) on interior land only.
+ */
+export function surfaceTileFacesOpenPerimeter(tile: PlatformTile): boolean {
+  const deltas = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ] as const;
+  for (const [dx, dz] of deltas) {
+    const key = tileKey(tile.gridX + dx, tile.gridZ + dz);
+    if (!PLATFORM_SURFACE_GRID_KEYS.has(key)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Grid cells that contain at least one platform tile (any height). Used to place elevators beside clusters. */
 const PLATFORM_GRID_OCCUPIED = new Set(PLATFORM_TILES.map((tile) => tileKey(tile.gridX, tile.gridZ)));
 
@@ -773,6 +795,9 @@ export const DECOR_ANCHORS: DecorAnchor[] = [];
 
 /** Single pickup crystal hue (instanced mesh, pickup VFX, lens flare). */
 export const CRYSTAL_COLOR = '#00e8f0';
+
+/** Instanced pickup mesh scale in world units (was 0.58 / 0.92 / 0.58; −25% → ×0.75). */
+export const CRYSTAL_INSTANCE_SCALE = [0.435, 0.69, 0.435] as const;
 
 export const CRYSTAL_ANCHORS: CrystalAnchor[] = [
   { ...anchorFromTileUnits('spawn-a', 2, 2, -0.06, 0.05), color: CRYSTAL_COLOR },

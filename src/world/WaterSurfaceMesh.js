@@ -193,24 +193,30 @@ class WaterSurfaceNode extends TempNode {
       const lit = vec4(this.color, 1.0).mul(mix(refractionSampler, reflectionSampler, mixFactor));
 
       const waterLin = linearDepth();
-      const sceneUV = viewportSafeUV(refractorUV);
-      const sceneLin = linearDepth(viewportDepthTexture(sceneUV));
-      /** Neighbor depth spread: high where refracted samples jump (thin grass, hairline gaps); low on flat seabed or big faces. */
+      /**
+       * Foam must sample scene depth at this fragment’s **undistorted** projection. Using `refractorUV`
+       * (screen + normal offset) shifts depth taps sideways and paints foam as an outer halo off the mesh.
+       */
+      const foamBaseUV = viewportSafeUV(screenUV);
+      const sceneLin = linearDepth(viewportDepthTexture(foamBaseUV));
+      /** Neighbor taps in screen space (still without refraction offset) for thin-geometry detection. */
       const depthTapPx = float(0.002);
       const sceneLinU = linearDepth(
-        viewportDepthTexture(viewportSafeUV(refractorUV.add(vec2(depthTapPx, 0)))),
+        viewportDepthTexture(viewportSafeUV(screenUV.add(vec2(depthTapPx, 0)))),
       );
       const sceneLinV = linearDepth(
-        viewportDepthTexture(viewportSafeUV(refractorUV.add(vec2(0, depthTapPx)))),
+        viewportDepthTexture(viewportSafeUV(screenUV.add(vec2(0, depthTapPx)))),
       );
       const depthSpread = max(abs(sceneLin.sub(sceneLinU)), abs(sceneLin.sub(sceneLinV)));
-      const thinGeomFoamMul = float(1).sub(smoothstep(float(0.00035), float(0.0028), depthSpread).mul(0.82));
+      /** Soften vs 0.82: refracted UVs at hulls read “thin” and were crushing boat/object foam to a hairline. */
+      const thinGeomFoamMul = float(1).sub(smoothstep(float(0.00035), float(0.0028), depthSpread).mul(0.42));
 
       const depthDiff = abs(waterLin.sub(sceneLin));
       const inner = float(0);
       const foamByDepth = float(1).sub(smoothstep(inner, this.foamDepthWidth, depthDiff));
-      const foamTight = pow(foamByDepth, float(2.1));
-      const behindScene = step(waterLin.add(float(0.00012)), sceneLin);
+      const foamTight = pow(foamByDepth, float(1.65));
+      /** Tighter gate: previous +0.00012 pushed foam away from the contact line. */
+      const behindScene = step(waterLin, sceneLin);
       const foamMask = foamTight.mul(behindScene).mul(thinGeomFoamMul);
 
       const wxz = positionWorld.xz;
@@ -248,6 +254,10 @@ export class WaterSurfaceMesh extends Mesh {
     super(geometry, material);
 
     this.isWater = true;
+    /** Dev unlit mode: surface tint lives in the water TSL graph, not `material.color`. */
+    this.userData.devUnlitWaterColor = new Color(
+      options.color !== undefined ? options.color : '#4fd6da',
+    );
 
     material.colorNode = new WaterSurfaceNode(options, this);
   }

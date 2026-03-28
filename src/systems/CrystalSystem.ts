@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { LensFlareEmissiveCandidate } from '../fx/LensFlareOverlay';
 import { CrystalPickupVfxHost } from '../fx/CrystalPickupVfx';
+import { CRYSTAL_INSTANCE_SCALE } from '../world/TerrainLayout';
 
 export interface CrystalInstance {
   id: string;
@@ -53,7 +54,7 @@ export class CrystalSystem {
       crystal.rotationY,
       Math.sin(this.elapsed * 2.2 + crystal.basePosition.z * 0.1) * 0.04,
     );
-    this.crystalDummy.scale.set(0.58, 0.92, 0.58);
+    this.crystalDummy.scale.set(...CRYSTAL_INSTANCE_SCALE);
     this.crystalDummy.updateMatrix();
     target.copy(this.crystalDummy.matrix);
   }
@@ -87,7 +88,7 @@ export class CrystalSystem {
         crystal.rotationY,
         Math.sin(this.elapsed * 2.2 + crystal.basePosition.z * 0.1) * 0.04,
       );
-      this.crystalDummy.scale.set(0.58, 0.92, 0.58);
+      this.crystalDummy.scale.set(...CRYSTAL_INSTANCE_SCALE);
       this.crystalDummy.updateMatrix();
 
       crystal.instancedMesh.setMatrixAt(crystal.instanceIndex, this.crystalDummy.matrix);
