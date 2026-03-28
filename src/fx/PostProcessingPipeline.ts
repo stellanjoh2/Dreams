@@ -76,6 +76,9 @@ export class PostProcessingPipeline {
   /** Live settings reference for async lens-dirt load → pipeline rebuild. */
   private latestFxSettings: FxSettings;
 
+  /** Smoothed sun-driven multiplier (avoids tone-map pops at the horizon). */
+  private exposureSunMulSmoothed = 1;
+
   constructor(
     renderer: WebGPURenderer,
     scene: THREE.Scene,
@@ -237,22 +240,40 @@ export class PostProcessingPipeline {
   }
 
   /**
-   * Darkens tone exposure when the sun is below the horizon and slightly when it is blocked by
-   * geometry; `App` calls this every frame so the Exposure slider stays the daytime baseline.
+   * Darkens tone exposure through dusk and night, slightly when the sun is blocked by geometry.
+   * Blend starts above the horizon so exposure eases with twilight (no step at elev = 0); result is
+   * damped in time to remove remaining pops (occlusion spikes, fast time-of-day scrubbing).
    */
   syncDynamicExposure(
     baseExposure: number,
     sunElevationAboveHorizonRad: number,
     sunGeometryOcclusion01: number,
+    deltaSeconds: number,
   ): void {
-    let mul = 1;
-    if (sunElevationAboveHorizonRad < 0) {
-      const t = THREE.MathUtils.smoothstep(-0.42, 0, sunElevationAboveHorizonRad);
-      mul = THREE.MathUtils.lerp(0.18, 1, t);
-    }
+    const dt = Math.max(1 / 240, deltaSeconds);
+
+    /** `smoothstep(x, min, max)` — begin dimming slightly before sunset, finish well below horizon. */
+    const elevLow = -0.55;
+    const elevHigh = 0.11;
+    const nightMul = 0.2;
+    const t = THREE.MathUtils.smoothstep(
+      sunElevationAboveHorizonRad,
+      elevLow,
+      elevHigh,
+    );
+    const targetSunMul = THREE.MathUtils.lerp(nightMul, 1, t);
+
+    this.exposureSunMulSmoothed = THREE.MathUtils.damp(
+      this.exposureSunMulSmoothed,
+      targetSunMul,
+      6,
+      dt,
+    );
+
+    let mul = this.exposureSunMulSmoothed;
     const occ = THREE.MathUtils.clamp(sunGeometryOcclusion01, 0, 1);
     if (occ > 1e-4) {
-      mul *= THREE.MathUtils.lerp(1, 0.91, occ);
+      mul *= THREE.MathUtils.lerp(1, 0.92, occ);
     }
     const effective = Math.max(0.02, baseExposure * mul);
     this.renderer.toneMappingExposure = effective;

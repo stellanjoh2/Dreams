@@ -86,9 +86,9 @@ export const DEFAULT_FX_SETTINGS: FxSettings = {
     waveScale: 26,
     waveHeight: 2.5,
     flowSpeed: 0.052,
-    foamIntensity: 0.16,
-    foamObjectRadius: 0.026,
-    normalDistort: 0.024,
+    foamIntensity: 0.33,
+    foamObjectRadius: 0.0006,
+    normalDistort: 0.022,
     opacity: 1,
   },
   /** Orby / meshgl-style dust; `public/textures/lens-dirt.jpg`. Boost follows sun flare visibility. */

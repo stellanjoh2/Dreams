@@ -57,6 +57,14 @@ export class FirstPersonCamera {
     this.camera.updateProjectionMatrix();
   }
 
+  getYaw(): number {
+    return this.yaw;
+  }
+
+  getPitch(): number {
+    return this.pitch;
+  }
+
   updateLook(deltaYaw: number, deltaPitch: number): void {
     this.yaw -= deltaYaw;
     this.pitch = THREE.MathUtils.clamp(
@@ -64,6 +72,17 @@ export class FirstPersonCamera {
       -Math.PI / 2 + 0.06,
       Math.PI / 2 - 0.06,
     );
+    this.camera.rotation.set(this.pitch, this.yaw, 0);
+  }
+
+  /**
+   * After cinematic roll: rebuild yaw/pitch from the current quaternion with roll zeroed so FPS /
+   * free-flight match the view direction.
+   */
+  applyOrientationWithoutRollFromCurrentQuaternion(): void {
+    const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
+    this.pitch = THREE.MathUtils.clamp(e.x, -Math.PI / 2 + 0.06, Math.PI / 2 - 0.06);
+    this.yaw = e.y;
     this.camera.rotation.set(this.pitch, this.yaw, 0);
   }
 

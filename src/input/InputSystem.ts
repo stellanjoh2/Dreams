@@ -14,6 +14,10 @@ export class InputSystem {
   private primaryAttackQueued = false;
   private toggleWeaponHiddenQueued = false;
   private toggleFreeFlightQueued = false;
+  private toggleCinematicCameraQueued = false;
+  private toggleCinematicCameraReverseQueued = false;
+  private toggleOrbitCameraQueued = false;
+  private toggleCinematicSunCycleQueued = false;
   private toggleEditorQueued = false;
   private devRenderModeQueued: DevRenderMode | null = null;
 
@@ -144,6 +148,30 @@ export class InputSystem {
     return value;
   }
 
+  consumeToggleCinematicCamera(): boolean {
+    const value = this.toggleCinematicCameraQueued;
+    this.toggleCinematicCameraQueued = false;
+    return value;
+  }
+
+  consumeToggleCinematicCameraReverse(): boolean {
+    const value = this.toggleCinematicCameraReverseQueued;
+    this.toggleCinematicCameraReverseQueued = false;
+    return value;
+  }
+
+  consumeToggleOrbitCamera(): boolean {
+    const value = this.toggleOrbitCameraQueued;
+    this.toggleOrbitCameraQueued = false;
+    return value;
+  }
+
+  consumeToggleCinematicSunCycle(): boolean {
+    const value = this.toggleCinematicSunCycleQueued;
+    this.toggleCinematicSunCycleQueued = false;
+    return value;
+  }
+
   /** Space up, Ctrl down — used only in free-flight mode (does not consume jump). */
   getFreeFlightVerticalAxis(): number {
     let v = 0;
@@ -214,6 +242,34 @@ export class InputSystem {
       }
     }
 
+    if (event.code === 'KeyC' && !event.repeat) {
+      if (!this.shouldIgnoreGameKeyTarget(event.target)) {
+        event.preventDefault();
+        this.toggleCinematicCameraQueued = true;
+      }
+    }
+
+    if (event.code === 'KeyV' && !event.repeat) {
+      if (!this.shouldIgnoreGameKeyTarget(event.target)) {
+        event.preventDefault();
+        this.toggleCinematicCameraReverseQueued = true;
+      }
+    }
+
+    if (event.code === 'KeyO' && !event.repeat) {
+      if (!this.shouldIgnoreGameKeyTarget(event.target)) {
+        event.preventDefault();
+        this.toggleOrbitCameraQueued = true;
+      }
+    }
+
+    if (event.code === 'KeyB' && !event.repeat) {
+      if (!this.shouldIgnoreGameKeyTarget(event.target)) {
+        event.preventDefault();
+        this.toggleCinematicSunCycleQueued = true;
+      }
+    }
+
     if (!event.repeat && !this.shouldIgnoreGameKeyTarget(event.target)) {
       if (event.code === 'Digit1') {
         this.devRenderModeQueued = 'normal';
@@ -236,8 +292,12 @@ export class InputSystem {
       return false;
     }
     const tag = el.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') {
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
       return true;
+    }
+    /** Hidden/disabled start UI can still be `document.activeElement` — allow C/V/O/B/F etc. */
+    if (tag === 'BUTTON') {
+      return el.getClientRects().length > 0 && !(el as HTMLButtonElement).disabled;
     }
     return Boolean(el.isContentEditable);
   }

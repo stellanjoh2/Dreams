@@ -5,6 +5,14 @@ import { loadDataTexture } from '../config/loadTexture';
 import { publicUrl } from '../config/publicUrl';
 import { FirstPersonCamera } from '../camera/FirstPersonCamera';
 import { updateFreeFlight } from '../camera/FreeFlightController';
+import {
+  createTrailerCameraState,
+  exitTrailerCamera,
+  toggleTrailerDolly,
+  toggleTrailerOrbit,
+  trailerCameraActive,
+  updateTrailerCamera,
+} from '../camera/CinematicCameraController';
 import { RendererCore } from './RendererCore';
 import { WorldManager } from '../world/WorldManager';
 import { InputSystem } from '../input/InputSystem';
@@ -26,6 +34,11 @@ const emissiveFlareScratch: LensFlareEmissiveCandidate[] = [];
 const cloneSettings = (): FxSettings => structuredClone(DEFAULT_FX_SETTINGS);
 const USE_POST_PROCESSING = true;
 
+/** Key B: one in-game day (`sunTimeOfDayHours` 0→24) over this many real seconds (25% slower than 120s). */
+const CINEMATIC_SUN_DAY_DURATION_SEC = 150;
+/** Ease-in so the cycle ramps up smoothly after toggling B on. */
+const CINEMATIC_SUN_RAMP_SEC = 3;
+
 export class App {
   private readonly ui: UIManager;
   private readonly settings: FxSettings;
@@ -44,6 +57,13 @@ export class App {
   private swordCombat?: SwordCombatView;
   /** Detached fly cam; player frozen until toggled off (F / gamepad RS click). */
   private freeFlightActive = false;
+  /** Trailer shots: C/V dolly+roll, O orbit (see CinematicCameraController). */
+  private readonly trailerCamera = createTrailerCameraState();
+  /** Key B: advance `sunTimeOfDayHours` for capture (~24h / 2.5 min); tap B again to stop and restore pre-B time. */
+  private cinematicSunCycleActive = false;
+  private cinematicSunRampElapsed = 0;
+  /** `sunTimeOfDayHours` when the current cycle was started — restored on stop. */
+  private cinematicSunTimeOfDayHoursSnapshot = 0;
   /** 1: normal; 2: unlit; 3: wireframe. Bypasses post when not normal (WebGPU needs NodeMaterials for overrides). */
   private devRenderMode: DevRenderMode = 'normal';
 
@@ -71,7 +91,9 @@ export class App {
 
     this.rendererCore = new RendererCore(this.ui.viewport);
     await this.rendererCore.init();
-    this.ui.attachCanvas(this.rendererCore.canvas);
+    const canvas = this.rendererCore.canvas;
+    canvas.tabIndex = 0;
+    this.ui.attachCanvas(canvas);
     this.ui.setRendererInfo('WebGPU / Three.js r183');
 
     this.cameraSystem = new FirstPersonCamera(this.rendererCore.canvas);
@@ -150,6 +172,10 @@ export class App {
       return;
     }
 
+    /** Start `<button>` often keeps focus while hidden — `InputSystem` would ignore all game keys on BUTTON. */
+    this.ui.startButton.blur();
+    this.rendererCore?.canvas.focus({ preventScroll: true });
+
     this.cameraSystem?.requestLock();
     void this.audio.unlock().then(() => this.reapplyAudioVolumes());
   }
@@ -200,14 +226,24 @@ export class App {
     this.postProcessing?.applySettings(this.settings);
     this.reapplyAudioVolumes();
     this.editor?.sync();
+    this.syncLensFlareFromAtmosphere();
+
+    localStorage.setItem(FX_SETTINGS_STORAGE_KEY, JSON.stringify(this.settings));
+  }
+
+  private syncLensFlareFromAtmosphere(): void {
     WorldManager.sunTemperatureToLightColor(
       WorldManager.computeSunVisualTemperatureForFlare(this.settings.atmosphere),
       this.sunFlareTintScratch,
     );
     this.lensFlare?.setColor(`#${this.sunFlareTintScratch.getHexString()}`);
     this.lensFlare?.setIntensity(this.settings.atmosphere.sunGlow);
+  }
 
-    localStorage.setItem(FX_SETTINGS_STORAGE_KEY, JSON.stringify(this.settings));
+  /** During cinematic sun cycle: update sky/sun/light only (no localStorage each frame). */
+  private applySunTimeAtmosphereToWorld(): void {
+    this.world?.applyFxSettings(this.settings);
+    this.syncLensFlareFromAtmosphere();
   }
 
   private resetSettings(): void {
@@ -257,17 +293,76 @@ export class App {
     }
 
     const combatUiOk = !this.editor?.isOpen;
+    const camSys = this.cameraSystem;
+    if (combatUiOk && camSys) {
+      const applyTrailerEnterCleanup = (activeBefore: boolean): void => {
+        if (!activeBefore && trailerCameraActive(this.trailerCamera)) {
+          this.freeFlightActive = false;
+          this.input.clearTransientActionQueuesForFreeFlight();
+        }
+      };
+
+      if (this.input.consumeToggleCinematicCamera()) {
+        const activeBefore = trailerCameraActive(this.trailerCamera);
+        toggleTrailerDolly(this.trailerCamera, camSys, 1);
+        applyTrailerEnterCleanup(activeBefore);
+      }
+      if (this.input.consumeToggleCinematicCameraReverse()) {
+        const activeBefore = trailerCameraActive(this.trailerCamera);
+        toggleTrailerDolly(this.trailerCamera, camSys, -1);
+        applyTrailerEnterCleanup(activeBefore);
+      }
+      if (this.input.consumeToggleOrbitCamera()) {
+        const activeBefore = trailerCameraActive(this.trailerCamera);
+        toggleTrailerOrbit(this.trailerCamera, camSys);
+        applyTrailerEnterCleanup(activeBefore);
+      }
+    }
+
+    /** Always consume so the queue cannot stick across editor open/close. */
+    if (this.input.consumeToggleCinematicSunCycle()) {
+      if (combatUiOk && camSys) {
+        this.cinematicSunCycleActive = !this.cinematicSunCycleActive;
+        if (this.cinematicSunCycleActive) {
+          this.cinematicSunRampElapsed = 0;
+          this.cinematicSunTimeOfDayHoursSnapshot = this.settings.atmosphere.sunTimeOfDayHours;
+        } else {
+          this.settings.atmosphere.sunTimeOfDayHours = this.cinematicSunTimeOfDayHoursSnapshot;
+          this.applySettings();
+        }
+      }
+    }
+
+    if (this.cinematicSunCycleActive && combatUiOk) {
+      this.cinematicSunRampElapsed += delta;
+      /** `smoothstep(x, min, max)` — value first (we had min/max/x reversed; ramp was stuck at 0). */
+      const ramp = THREE.MathUtils.smoothstep(
+        this.cinematicSunRampElapsed,
+        0,
+        CINEMATIC_SUN_RAMP_SEC,
+      );
+      const hoursPerSec = 24 / CINEMATIC_SUN_DAY_DURATION_SEC;
+      this.settings.atmosphere.sunTimeOfDayHours = THREE.MathUtils.euclideanModulo(
+        this.settings.atmosphere.sunTimeOfDayHours + hoursPerSec * delta * ramp,
+        24,
+      );
+      this.applySunTimeAtmosphereToWorld();
+    }
+
     if (this.input.consumeToggleFreeFlight()) {
       if (combatUiOk) {
         this.freeFlightActive = !this.freeFlightActive;
         if (this.freeFlightActive) {
+          if (trailerCameraActive(this.trailerCamera) && this.cameraSystem) {
+            exitTrailerCamera(this.trailerCamera, this.cameraSystem);
+          }
           this.input.clearTransientActionQueuesForFreeFlight();
         }
       }
     }
 
     /** In-world first person (sword can be drawn); pointer lock only gates attacks. */
-    const firstPersonWorld = combatUiOk && !this.freeFlightActive;
+    const firstPersonWorld = combatUiOk && !this.freeFlightActive && !trailerCameraActive(this.trailerCamera);
     const combatActive = this.cameraSystem.locked && firstPersonWorld;
     if (this.input.consumeToggleWeaponHidden()) {
       if (firstPersonWorld) {
@@ -284,6 +379,9 @@ export class App {
       this.editor?.toggle();
       if (this.editor?.isOpen) {
         this.freeFlightActive = false;
+        if (trailerCameraActive(this.trailerCamera) && this.cameraSystem) {
+          exitTrailerCamera(this.trailerCamera, this.cameraSystem);
+        }
         if (document.pointerLockElement) {
           void document.exitPointerLock();
         }
@@ -293,7 +391,11 @@ export class App {
     this.world.syncDynamicPlatforms(elapsed);
     this.audio.tickElevatorSounds(elapsed, this.cameraSystem.camera);
 
-    if (this.freeFlightActive) {
+    if (trailerCameraActive(this.trailerCamera)) {
+      this.input.consumeJump();
+      this.input.consumeInteract();
+      updateTrailerCamera(delta, this.trailerCamera, this.cameraSystem);
+    } else if (this.freeFlightActive) {
       this.input.consumeJump();
       this.input.consumeInteract();
       updateFreeFlight(delta, this.cameraSystem, this.input, this.settings);
@@ -320,7 +422,7 @@ export class App {
 
     this.world.update(delta, elapsed, this.cameraSystem.camera, this.player.position);
     this.crystalSystem.update(delta);
-    if (!this.freeFlightActive) {
+    if (!this.freeFlightActive && !trailerCameraActive(this.trailerCamera)) {
       this.interactionSystem?.update(this.cameraSystem.getPosition(this.cameraPosition), this.input);
     }
     this.postProcessing?.setCrystalPickupPulse(this.crystalSystem.getScreenPickupPulse());
@@ -358,7 +460,7 @@ export class App {
     this.postProcessing?.setLensDirtSunBoost(lensDirtSunBoost);
     const sunElev = WorldManager.computeSunElevationAboveHorizonRad(this.settings.atmosphere.sunTimeOfDayHours);
     const sunGeomOcc = this.lensFlare?.getSunGeometryOcclusion01() ?? 0;
-    this.postProcessing?.syncDynamicExposure(this.settings.exposure, sunElev, sunGeomOcc);
+    this.postProcessing?.syncDynamicExposure(this.settings.exposure, sunElev, sunGeomOcc, delta);
     this.rendererCore.prepareFrame();
     const useDirectSceneRender = this.devRenderMode !== 'normal';
     if (useDirectSceneRender) {
