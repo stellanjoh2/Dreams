@@ -78,6 +78,7 @@ function tuneMountainMaterials(object: THREE.Object3D): void {
         transparent?: boolean;
         depthWrite?: boolean;
         depthTest?: boolean;
+        fog?: boolean;
       };
       if (m.opacity !== undefined && m.opacity < 0.99) {
         continue;
@@ -86,6 +87,8 @@ function tuneMountainMaterials(object: THREE.Object3D): void {
       m.opacity = 1;
       m.depthWrite = true;
       m.depthTest = true;
+      /** Ensure Exp2 scene fog applies (GLTF / WebGPU node conversion can leave this off). */
+      m.fog = true;
 
       if (mat instanceof THREE.MeshStandardMaterial || mat instanceof THREE.MeshPhysicalMaterial) {
         mat.color.multiplyScalar(MOUNTAIN_ALBEDO_DARKEN);

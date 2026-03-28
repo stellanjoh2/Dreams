@@ -19,9 +19,10 @@ const PLANET_BASE_COLOR_URL = publicUrl('assets/planets_lowpoly_textures/base_co
 
 /**
  * Orbit radius beyond mountain pivots (blocks). Mountains sit at
- * `farOuterR + MOUNTAIN_ORBIT_MARGIN_BLOCKS` (+ spawn slot extra); planets sit farther out.
+ * `farOuterR + MOUNTAIN_ORBIT_MARGIN_BLOCKS` (+ spawn slot extra). Nearer = less grazing
+ * texture shimmer; sun anchor (`getSunAnchorHorizonDistanceWorld`) uses the same value.
  */
-const PLANET_ORBIT_EXTRA_BLOCKS = 96;
+const PLANET_ORBIT_EXTRA_BLOCKS = 52;
 
 /** Base longest axis after normalize — larger than mountain mesh target so silhouettes read huge at range. */
 const PLANET_BASE_TARGET_EXTENT = BLOCK_UNIT * 188;
@@ -104,14 +105,25 @@ function normalizePlanetCentered(model: THREE.Object3D, targetMaxExtent: number)
   model.position.sub(center);
 }
 
+function configurePlanetAtlasTexture(tex: THREE.Texture): void {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.flipY = false;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  /** Grazing angles on huge spheres — default anisotropy 1 reads as vertical shimmer / “pixels”. */
+  tex.anisotropy = 16;
+  tex.needsUpdate = true;
+}
+
 function loadPlanetBaseColorTexture(loader: THREE.TextureLoader): Promise<THREE.Texture | null> {
   return new Promise((resolve) => {
     loader.load(
       PLANET_BASE_COLOR_URL,
       (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.flipY = false;
-        tex.needsUpdate = true;
+        configurePlanetAtlasTexture(tex);
         resolve(tex);
       },
       undefined,
@@ -166,6 +178,7 @@ function tunePlanetMaterials(object: THREE.Object3D): void {
         continue;
       }
       const m = mat as THREE.Material & { fog?: boolean };
+      /** Match distant haze with the rest of the world (atlas mip + anisotropy still reduce shimmer). */
       m.fog = true;
 
       if (mat instanceof THREE.MeshStandardMaterial || mat instanceof THREE.MeshPhysicalMaterial) {
