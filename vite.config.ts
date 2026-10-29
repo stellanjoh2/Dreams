@@ -9,7 +9,7 @@ export default defineConfig(({ command }) => ({
      * sandboxes and can break `npm run dev` entirely. Use `npm run dev:lan` when you need other devices.
      */
     host: '127.0.0.1',
-    port: 5173,
+    port: 5174,
     strictPort: false,
   },
 }));

@@ -333,6 +333,81 @@ export class CactusEnemySystem {
     parent.add(this.root);
   }
 
+  private spawnEnemiesFromTemplate(
+    template: THREE.Object3D,
+    skinned: boolean,
+    idleClip: THREE.AnimationClip | null,
+    blockedDecorTiles: ReadonlySet<string>,
+  ): void {
+    const blockedGrid = jumpPadBlockedGridKeys();
+    const candidates = PLATFORM_SURFACE_TILES.filter((tile) => {
+      const key = `${tile.gridX}:${tile.gridZ}`;
+      if (blockedGrid.has(key)) {
+        return false;
+      }
+      if (blockedDecorTiles.has(key)) {
+        return false;
+      }
+      return !tileWouldSpawnPlant(tile);
+    }).sort((a, b) => {
+      const da = Math.hypot(a.x - CACTUS_SPAWN_HINT_X, a.z - CACTUS_SPAWN_HINT_Z);
+      const db = Math.hypot(b.x - CACTUS_SPAWN_HINT_X, b.z - CACTUS_SPAWN_HINT_Z);
+      if (Math.abs(da - db) > BLOCK_UNIT * 0.25) {
+        return da - db;
+      }
+      return hashTile(a.gridX, a.gridZ, 44.3) - hashTile(b.gridX, b.gridZ, 44.3);
+    });
+
+    const spawns: PlatformTile[] = [];
+    for (const tile of candidates) {
+      if (spawns.length >= ENEMY_TARGET_COUNT) {
+        break;
+      }
+      const ok = spawns.every((t) => {
+        const dx = t.x - tile.x;
+        const dz = t.z - tile.z;
+        return Math.hypot(dx, dz) >= MIN_SPAWN_SEPARATION;
+      });
+      if (ok) {
+        spawns.push(tile);
+      }
+    }
+
+    for (const tile of spawns) {
+      const enemy = skinned ? cloneSkinnedHierarchy(template) : template.clone(true);
+      applyShadowFlags(enemy);
+      sanitizeCactusShading(enemy);
+      normalizeEnemyOnTile(enemy, TARGET_ENEMY_HEIGHT);
+      boostEnemyAlbedoBrightness(enemy, ALBEDO_BRIGHTNESS_MULT);
+      enemy.rotation.y = CACTUS_MODEL_YAW_OFFSET;
+
+      const groundY = this.terrainPhysics.getGroundHeightAt(tile.x, tile.z) ?? tile.topY;
+
+      const pivot = new THREE.Group();
+      pivot.name = 'CactusEnemyPivot';
+      pivot.add(enemy);
+      pivot.position.set(tile.x, groundY, tile.z);
+      this.root.add(pivot);
+
+      const mixer = new THREE.AnimationMixer(enemy);
+      let idleAction: THREE.AnimationAction | null = null;
+
+      if (idleClip) {
+        const ic = idleClip.clone();
+        idleAction = mixer.clipAction(ic);
+        idleAction.loop = THREE.LoopRepeat;
+        idleAction.clampWhenFinished = false;
+        idleAction.play();
+      }
+
+      this.enemies.push({
+        root: pivot,
+        mixer,
+        idleAction,
+      });
+    }
+  }
+
   load(blockedDecorTiles: ReadonlySet<string>): void {
     this.loader.load(
       MODEL_URL,
@@ -351,78 +426,11 @@ export class CactusEnemySystem {
           console.info('[CactusEnemy] idle clip:', idleClip?.name ?? '(none)');
         }
         const skinned = hasSkinnedDescendant(template);
-
-        const blockedGrid = jumpPadBlockedGridKeys();
-        const candidates = PLATFORM_SURFACE_TILES.filter((tile) => {
-          const key = `${tile.gridX}:${tile.gridZ}`;
-          if (blockedGrid.has(key)) {
-            return false;
-          }
-          if (blockedDecorTiles.has(key)) {
-            return false;
-          }
-          return !tileWouldSpawnPlant(tile);
-        }).sort((a, b) => {
-          const da = Math.hypot(a.x - CACTUS_SPAWN_HINT_X, a.z - CACTUS_SPAWN_HINT_Z);
-          const db = Math.hypot(b.x - CACTUS_SPAWN_HINT_X, b.z - CACTUS_SPAWN_HINT_Z);
-          if (Math.abs(da - db) > BLOCK_UNIT * 0.25) {
-            return da - db;
-          }
-          return hashTile(a.gridX, a.gridZ, 44.3) - hashTile(b.gridX, b.gridZ, 44.3);
-        });
-
-        const spawns: PlatformTile[] = [];
-        for (const tile of candidates) {
-          if (spawns.length >= ENEMY_TARGET_COUNT) {
-            break;
-          }
-          const ok = spawns.every((t) => {
-            const dx = t.x - tile.x;
-            const dz = t.z - tile.z;
-            return Math.hypot(dx, dz) >= MIN_SPAWN_SEPARATION;
-          });
-          if (ok) {
-            spawns.push(tile);
-          }
-        }
-
-        for (const tile of spawns) {
-          const enemy = skinned ? cloneSkinnedHierarchy(template) : template.clone(true);
-          applyShadowFlags(enemy);
-          sanitizeCactusShading(enemy);
-          normalizeEnemyOnTile(enemy, TARGET_ENEMY_HEIGHT);
-          boostEnemyAlbedoBrightness(enemy, ALBEDO_BRIGHTNESS_MULT);
-          enemy.rotation.y = CACTUS_MODEL_YAW_OFFSET;
-
-          const groundY = this.terrainPhysics.getGroundHeightAt(tile.x, tile.z) ?? tile.topY;
-
-          const pivot = new THREE.Group();
-          pivot.name = 'CactusEnemyPivot';
-          pivot.add(enemy);
-          pivot.position.set(tile.x, groundY, tile.z);
-          this.root.add(pivot);
-
-          const mixer = new THREE.AnimationMixer(enemy);
-          let idleAction: THREE.AnimationAction | null = null;
-
-          if (idleClip) {
-            const ic = idleClip.clone();
-            idleAction = mixer.clipAction(ic);
-            idleAction.loop = THREE.LoopRepeat;
-            idleAction.clampWhenFinished = false;
-            idleAction.play();
-          }
-
-          this.enemies.push({
-            root: pivot,
-            mixer,
-            idleAction,
-          });
-        }
+        this.spawnEnemiesFromTemplate(template, skinned, idleClip, blockedDecorTiles);
       },
       undefined,
-      () => {
-        /* Missing `public/assets/low_poly_cactus_enemy.glb` */
+      (err) => {
+        console.warn('[CactusEnemy] GLB load failed:', MODEL_URL, err);
       },
     );
   }

@@ -2,7 +2,11 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { AtmosphereSettings, FxSettings, WaterFxSettings } from '../fx/FxSettings';
 import { WATER_SURFACE_Y } from '../config/defaults';
-import { isFresnelCapableMaterial, updateFresnelMaterial } from '../materials/FresnelMaterial';
+import {
+  ENABLE_CANDY_FRESNEL,
+  isFresnelCapableMaterial,
+  updateFresnelMaterial,
+} from '../materials/FresnelMaterial';
 import { PropFactory } from './PropFactory';
 import { AmbientDustSystem } from './AmbientDustSystem';
 import { FishSchoolsSystem } from './FishSchoolsSystem';
@@ -17,6 +21,7 @@ import { MountainBackdropProp } from './MountainBackdropProp';
 import { ButterflyScatterSystem } from './ButterflyScatterSystem';
 import { WaterEdgeGrassScatter } from './WaterEdgeGrassScatter';
 import { SeaFloorRocksScatter } from './SeaFloorRocksScatter';
+import { BirdFlightRingSystem } from './BirdFlightRingSystem';
 import { OrbitingUfoProp } from './OrbitingUfoProp';
 import { CactusEnemySystem } from './CactusEnemySystem';
 import {
@@ -179,6 +184,7 @@ export class WorldManager {
   private readonly waterEdgeGrass: WaterEdgeGrassScatter;
   private readonly seaFloorRocks: SeaFloorRocksScatter;
   private readonly orbitingUfo: OrbitingUfoProp;
+  private readonly birdFlightRing: BirdFlightRingSystem;
   private distantBackdrop: THREE.Group | null = null;
   private orbitalClouds: OrbitalCloud[] = [];
   private cloudRingGroup?: THREE.Group;
@@ -236,6 +242,7 @@ export class WorldManager {
     this.waterEdgeGrass = new WaterEdgeGrassScatter(this.worldRoot, this.plantLoader);
     this.seaFloorRocks = new SeaFloorRocksScatter();
     this.orbitingUfo = new OrbitingUfoProp(this.worldRoot, this.plantLoader);
+    this.birdFlightRing = new BirdFlightRingSystem(this.worldRoot);
     this.scene.add(this.worldRoot);
 
     for (const anchor of RESPAWN_ANCHORS) {
@@ -270,6 +277,7 @@ export class WorldManager {
     this.distantPlanets.load();
     this.mountainBackdrop.load();
     this.orbitingUfo.load();
+    this.birdFlightRing.load();
     this.seedDecorOccupancyFromWorldProps();
     this.worldRoot.add(this.plantScatterRoot);
     this.buildLandmarks();
@@ -308,12 +316,11 @@ export class WorldManager {
   }
 
   /**
-   * Instanced plants (reserves tiles), then spawns cactus enemies on remaining free tiles.
+   * Instanced plants (reserves tiles). Cactus enemies are skipped for now (no GLB load / no fallback).
    * Call after `build()` and before butterflies so props don’t overlap.
    */
   async loadDecorScatter(): Promise<void> {
     await this.loadPlantScatter();
-    this.cactusEnemies.load(this.decorOccupiedSurfaceKeys);
   }
 
   private seedDecorOccupancyFromWorldProps(): void {
@@ -350,6 +357,7 @@ export class WorldManager {
     this.ambientDust.update(elapsed, camera);
     this.fishSchools.update(delta, elapsed);
     this.orbitingUfo.update(delta, elapsed);
+    this.birdFlightRing.update(delta, elapsed);
     this.butterflyScatter.update(delta, elapsed);
     this.fishingBoatRight.update(delta, elapsed);
     this.fishingBoatLeft.update(delta, elapsed);
@@ -508,25 +516,27 @@ export class WorldManager {
     const fresnelSig = `${settings.fresnel.color}\0${settings.fresnel.strength}\0${settings.fresnel.radius}`;
     if (fresnelSig !== this.fresnelSettingsSignature) {
       this.fresnelSettingsSignature = fresnelSig;
-      this.worldRoot.traverse((child) => {
-        if (!(child as THREE.Mesh).isMesh) {
-          return;
-        }
-
-        const mesh = child as THREE.Mesh;
-        const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.Material[];
-
-        materials.forEach((material: THREE.Material) => {
-          if (material && isFresnelCapableMaterial(material)) {
-            updateFresnelMaterial(
-              material,
-              settings.fresnel.color,
-              settings.fresnel.strength,
-              settings.fresnel.radius,
-            );
+      if (ENABLE_CANDY_FRESNEL) {
+        this.worldRoot.traverse((child) => {
+          if (!(child as THREE.Mesh).isMesh) {
+            return;
           }
+
+          const mesh = child as THREE.Mesh;
+          const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.Material[];
+
+          materials.forEach((material: THREE.Material) => {
+            if (material && isFresnelCapableMaterial(material)) {
+              updateFresnelMaterial(
+                material,
+                settings.fresnel.color,
+                settings.fresnel.strength,
+                settings.fresnel.radius,
+              );
+            }
+          });
         });
-      });
+      }
     }
   }
 
@@ -598,7 +608,7 @@ export class WorldManager {
     const sunCol = WorldManager.sunTemperatureToLightColor(sunTint, new THREE.Color());
     this.sunLight = new THREE.DirectionalLight(sunCol, 3.45 * settings.atmosphere.sunGlow * (1 + sunsetPh * 0.1));
     this.sunLight.castShadow = true;
-    this.sunLight.shadow.mapSize.set(1536, 1536);
+    this.sunLight.shadow.mapSize.set(512, 512);
     this.sunLight.shadow.bias = -0.00008;
     this.sunLight.shadow.normalBias = 0.01;
     this.sunLight.shadow.camera.near = 1;
@@ -640,13 +650,17 @@ export class WorldManager {
 
   /**
    * 0 = cool (night below horizon), 1 = warm at horizon; zenith cools via 1−sin(elev).
+   * Below horizon, warmth fades out over ~0.16 rad — a hard cutoff used to sit here and caused a 1-frame white pop.
    */
   static computeTimeDrivenSunWarmth01(elevationAboveHorizonRad: number): number {
-    if (elevationAboveHorizonRad < -0.035) {
-      return 0;
-    }
     const e = Math.max(0, elevationAboveHorizonRad);
-    return 1 - Math.sin(THREE.MathUtils.clamp(e, 0, Math.PI / 2));
+    let warmth = 1 - Math.sin(THREE.MathUtils.clamp(e, 0, Math.PI / 2));
+    if (elevationAboveHorizonRad < 0) {
+      const below = -elevationAboveHorizonRad;
+      const horizonFade = 1 - THREE.MathUtils.smoothstep(0.02, 0.16, below);
+      warmth *= horizonFade;
+    }
+    return warmth;
   }
 
   /** Combines time-of-day warmth with {@link AtmosphereSettings.sunTemperature} bias (0.5 = neutral). */
@@ -744,7 +758,8 @@ export class WorldManager {
   }
 
   private buildSun(settings: FxSettings): void {
-    const coreGeo = new THREE.SphereGeometry(WorldManager.SUN_CORE_RADIUS, 48, 32);
+    /** Was 48×32; ~50% fewer tris (32×24) — still smooth at distance / with bloom. */
+    const coreGeo = new THREE.SphereGeometry(WorldManager.SUN_CORE_RADIUS, 32, 24);
     const coreMat = new THREE.MeshBasicMaterial({
       fog: false,
       toneMapped: false,

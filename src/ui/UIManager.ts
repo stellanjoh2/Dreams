@@ -127,7 +127,7 @@ export class UIManager {
   setPointerLocked(locked: boolean): void {
     this.startCard.hidden = locked;
     this.hudStatus.textContent = locked
-      ? 'WASD move, mouse look, Space jump, E collect, Shift drift faster, P tune FX.'
+      ? 'WASD/arrows move, mouse look, LMB jump, Space swing, E collect, Shift run, P tune FX.'
       : 'Paused. Click to re-enter the desert.';
   }
 

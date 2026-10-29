@@ -4,8 +4,8 @@ import type { FirstPersonCamera } from './FirstPersonCamera';
 /** World units per second — slow dolly for trailer shots. */
 const FORWARD_SPEED = 0.55;
 
-/** Full 360° roll period (seconds); ~60s as requested. */
-const ROLL_PERIOD_SEC = 60;
+/** Full 360° roll period (seconds); 120s = 50% slower roll than the original 60s C/V dolly. */
+const ROLL_PERIOD_SEC = 120;
 
 /** Key C: starting roll (degrees). */
 const DOLLY_INITIAL_ROLL_C_DEG = -22.5;

@@ -216,8 +216,9 @@ function applyMountainShadowFlags(object: THREE.Object3D): void {
   object.traverse((child) => {
     const mesh = child as THREE.Mesh;
     if (mesh.isMesh) {
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
+      /** Outside the sun shadow ortho (±90 / far 180); casting/receiving only adds map noise. */
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
       /** Large props with odd pivots can disappear from frustum tests at grazing angles. */
       mesh.frustumCulled = false;
     }

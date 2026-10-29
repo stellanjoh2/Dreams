@@ -33,9 +33,11 @@ export class InputSystem {
   constructor() {
     this.handleKeyDown = this.handleKeyDown.bind(this);
     this.handleKeyUp = this.handleKeyUp.bind(this);
+    this.handleKeyPress = this.handleKeyPress.bind(this);
 
     window.addEventListener('keydown', this.handleKeyDown, InputSystem.keyListenerOpts);
     window.addEventListener('keyup', this.handleKeyUp, InputSystem.keyListenerOpts);
+    window.addEventListener('keypress', this.handleKeyPress, InputSystem.keyListenerOpts);
   }
 
   /** Analog move multipliers; look rates are applied in `PlayerController` (rad/s). */
@@ -52,7 +54,13 @@ export class InputSystem {
       this.gamepadMove.normalize();
     }
     this.gamepadLook.set(state.lookX, state.lookY);
-    this.running = this.pressedKeys.has('ShiftLeft') || this.pressedKeys.has('ShiftRight') || state.run;
+    this.running =
+      this.pressedKeys.has('ShiftLeft') ||
+      this.pressedKeys.has('ShiftRight') ||
+      /** Ctrl avoids the Shift+Space browser/OS chord and some W+Shift+Space keyboard ghosting. */
+      this.pressedKeys.has('ControlLeft') ||
+      this.pressedKeys.has('ControlRight') ||
+      state.run;
 
     if (state.jump.justPressed) {
       this.jumpQueued = true;
@@ -81,8 +89,10 @@ export class InputSystem {
 
   getMovementAxes(target = new THREE.Vector2()): THREE.Vector2 {
     this.keyboardMove.set(
-      Number(this.pressedKeys.has('KeyD')) - Number(this.pressedKeys.has('KeyA')),
-      Number(this.pressedKeys.has('KeyW')) - Number(this.pressedKeys.has('KeyS')),
+      Number(this.pressedKeys.has('KeyD') || this.pressedKeys.has('ArrowRight')) -
+        Number(this.pressedKeys.has('KeyA') || this.pressedKeys.has('ArrowLeft')),
+      Number(this.pressedKeys.has('KeyW') || this.pressedKeys.has('ArrowUp')) -
+        Number(this.pressedKeys.has('KeyS') || this.pressedKeys.has('ArrowDown')),
     );
 
     if (this.keyboardMove.lengthSq() > 1) {
@@ -118,6 +128,11 @@ export class InputSystem {
     const value = this.jumpQueued;
     this.jumpQueued = false;
     return value;
+  }
+
+  /** Left mouse (and gamepad face button) — Space is free-flight up / sword swing. */
+  queueJump(): void {
+    this.jumpQueued = true;
   }
 
   consumeInteract(): boolean {
@@ -204,20 +219,38 @@ export class InputSystem {
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
-    this.pressedKeys.add(event.code);
+    const typing = this.shouldIgnoreGameKeyTarget(event.target);
+    const space = event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar';
+    const arrow =
+      event.code === 'ArrowUp' ||
+      event.code === 'ArrowDown' ||
+      event.code === 'ArrowLeft' ||
+      event.code === 'ArrowRight';
+
+    if ((space || arrow) && !typing) {
+      // Shift+Space is the browser “scroll up” chord. Don’t preventDefault on Shift
+      // itself — that makes macOS drop the held run key.
+      event.preventDefault();
+    }
+
+    if (event.getModifierState('Shift')) {
+      if (!this.pressedKeys.has('ShiftLeft') && !this.pressedKeys.has('ShiftRight')) {
+        this.pressedKeys.add(event.code === 'ShiftRight' ? 'ShiftRight' : 'ShiftLeft');
+      }
+    }
+
+    if (space) {
+      if (!event.repeat) {
+        this.primaryAttackQueued = true;
+      }
+      this.pressedKeys.add('Space');
+    } else if (event.code) {
+      this.pressedKeys.add(event.code);
+    }
 
     if (event.repeat && event.code === 'KeyP') {
       event.preventDefault();
       return;
-    }
-
-    if (event.code === 'Space') {
-      if (document.pointerLockElement) {
-        event.preventDefault();
-      }
-      if (!event.repeat) {
-        this.jumpQueued = true;
-      }
     }
 
     if (event.code === 'KeyE') {
@@ -282,7 +315,39 @@ export class InputSystem {
   }
 
   private handleKeyUp(event: KeyboardEvent): void {
+    if (
+      (event.code === 'ShiftLeft' || event.code === 'ShiftRight') &&
+      event.getModifierState('Shift')
+    ) {
+      return;
+    }
     this.pressedKeys.delete(event.code);
+    if (event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar') {
+      this.pressedKeys.delete('Space');
+    }
+    if (!event.getModifierState('Shift')) {
+      this.pressedKeys.delete('ShiftLeft');
+      this.pressedKeys.delete('ShiftRight');
+    }
+  }
+
+  /** Some browsers deliver Shift+Space as keypress only (keeps run + free-flight up). */
+  private handleKeyPress(event: KeyboardEvent): void {
+    if (event.key !== ' ' && event.code !== 'Space' && event.key !== 'Spacebar') {
+      return;
+    }
+    if (!this.shouldIgnoreGameKeyTarget(event.target)) {
+      event.preventDefault();
+    }
+    if (event.getModifierState('Shift') || event.shiftKey) {
+      if (!this.pressedKeys.has('ShiftLeft') && !this.pressedKeys.has('ShiftRight')) {
+        this.pressedKeys.add('ShiftLeft');
+      }
+    }
+    if (!this.pressedKeys.has('Space')) {
+      this.pressedKeys.add('Space');
+      this.primaryAttackQueued = true;
+    }
   }
 
   /** Don’t steal keys from range inputs / the FX editor fields. */
@@ -305,5 +370,6 @@ export class InputSystem {
   dispose(): void {
     window.removeEventListener('keydown', this.handleKeyDown, InputSystem.keyListenerOpts);
     window.removeEventListener('keyup', this.handleKeyUp, InputSystem.keyListenerOpts);
+    window.removeEventListener('keypress', this.handleKeyPress, InputSystem.keyListenerOpts);
   }
 }

@@ -189,8 +189,13 @@ export class PostProcessingPipeline {
     );
 
     const linearDepth = this.scenePass.getLinearDepthNode('depth');
-    const aoFarBlend = smoothstep(float(0.18), float(0.62), linearDepth);
-    const aoSample = this.aoNode.getTextureNode().r.clamp(0.68, 1);
+    /**
+     * GTAO at mid/far range speckles huge backdrop shells (planets, mountains): depth is coarse
+     * and the half-res AO buffer upscales into a hatch. Fade AO out early so only near playfield
+     * keeps contact darkening. (0–1 = near→camera.far; planets sit well past ~0.2.)
+     */
+    const aoFarBlend = smoothstep(float(0.04), float(0.16), linearDepth);
+    const aoSample = this.aoNode.getTextureNode().r.clamp(0.78, 1);
     const aoFactor = mix(aoSample, float(1), aoFarBlend);
 
     const preAoRgb = settings.motionBlur.enabled

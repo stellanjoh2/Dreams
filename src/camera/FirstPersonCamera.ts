@@ -31,9 +31,11 @@ export class FirstPersonCamera {
 
     this.handleMouseMove = this.handleMouseMove.bind(this);
     this.handlePointerLockChange = this.handlePointerLockChange.bind(this);
+    this.handleFullscreenChange = this.handleFullscreenChange.bind(this);
 
     document.addEventListener('mousemove', this.handleMouseMove);
     document.addEventListener('pointerlockchange', this.handlePointerLockChange);
+    document.addEventListener('fullscreenchange', this.handleFullscreenChange);
   }
 
   setLockChangeListener(callback: (locked: boolean) => void): void {
@@ -48,12 +50,84 @@ export class FirstPersonCamera {
     this.sensitivity = value;
   }
 
+  /**
+   * Pointer lock alone cannot capture Shift+Space in Chrome — Keyboard Lock only works during
+   * JS-initiated fullscreen. Enter fullscreen from this user gesture, then lock play keys.
+   */
   requestLock(): void {
-    void this.domElement.requestPointerLock();
+    void this.enterPlayLocks();
+  }
+
+  private async enterPlayLocks(): Promise<void> {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch {
+      // Denied / unsupported — pointer lock still works; Shift+Space may not.
+    }
+
+    try {
+      const pointerLock = this.domElement.requestPointerLock();
+      if (pointerLock && typeof (pointerLock as Promise<void>).then === 'function') {
+        await pointerLock;
+      }
+    } catch {
+      return;
+    }
+
+    await this.lockGameKeys();
+  }
+
+  private async lockGameKeys(): Promise<void> {
+    if (!document.fullscreenElement) {
+      return;
+    }
+    const keyboard = (
+      navigator as Navigator & {
+        keyboard?: { lock: (keys?: string[]) => Promise<void>; unlock: () => void };
+      }
+    ).keyboard;
+    if (!keyboard?.lock) {
+      return;
+    }
+    // Locking Space includes Shift+Space (Chrome Keyboard Lock docs).
+    await keyboard
+      .lock([
+        'Space',
+        'ShiftLeft',
+        'ShiftRight',
+        'KeyW',
+        'KeyA',
+        'KeyS',
+        'KeyD',
+        'ArrowUp',
+        'ArrowDown',
+        'ArrowLeft',
+        'ArrowRight',
+      ])
+      .catch(() => undefined);
+  }
+
+  private unlockGameKeys(): void {
+    (
+      navigator as Navigator & {
+        keyboard?: { unlock: () => void };
+      }
+    ).keyboard?.unlock();
   }
 
   setAspect(aspect: number): void {
     this.camera.aspect = aspect;
+    this.camera.updateProjectionMatrix();
+  }
+
+  setViewDistance(far: number): void {
+    const next = Math.max(this.camera.near + 1, far);
+    if (Math.abs(this.camera.far - next) < 1e-3) {
+      return;
+    }
+    this.camera.far = next;
     this.camera.updateProjectionMatrix();
   }
 
@@ -167,11 +241,31 @@ export class FirstPersonCamera {
 
   private handlePointerLockChange(): void {
     this.isLocked = document.pointerLockElement === this.domElement;
+    if (!this.isLocked) {
+      this.unlockGameKeys();
+      if (document.fullscreenElement) {
+        void document.exitFullscreen().catch(() => undefined);
+      }
+    } else if (document.fullscreenElement) {
+      void this.lockGameKeys();
+    }
     this.onLockChange?.(this.isLocked);
+  }
+
+  private handleFullscreenChange(): void {
+    if (document.fullscreenElement && this.isLocked) {
+      void this.lockGameKeys();
+      return;
+    }
+    if (!document.fullscreenElement) {
+      this.unlockGameKeys();
+    }
   }
 
   dispose(): void {
     document.removeEventListener('mousemove', this.handleMouseMove);
     document.removeEventListener('pointerlockchange', this.handlePointerLockChange);
+    document.removeEventListener('fullscreenchange', this.handleFullscreenChange);
+    this.unlockGameKeys();
   }
 }

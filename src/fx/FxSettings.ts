@@ -33,6 +33,8 @@ export interface CameraFeelSettings {
   headBobSpeed: number;
   normalFov: number;
   fastFov: number;
+  /** Perspective camera far clip (world units). Raise if distant scenery / sky clips to black. */
+  viewDistance: number;
 }
 
 export interface FresnelSettings {
@@ -145,4 +147,4 @@ export interface FxSettings {
   lensDirt: LensDirtSettings;
 }
 
-export const FX_SETTINGS_STORAGE_KEY = 'candylands.fx.settings.v8';
+export const FX_SETTINGS_STORAGE_KEY = 'candylands.fx.settings.v10';

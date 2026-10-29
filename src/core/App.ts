@@ -196,7 +196,7 @@ export class App {
 
     canvas.addEventListener('pointerdown', (event) => {
       if (event.button === 0 && document.pointerLockElement === canvas && !this.editor?.isOpen) {
-        this.input.queuePrimaryAttack();
+        this.input.queueJump();
       }
       if (event.button === 2) {
         event.preventDefault();
@@ -221,6 +221,7 @@ export class App {
 
   private applySettings(): void {
     this.cameraSystem?.setSensitivity(this.settings.cameraFeel.lookSensitivity);
+    this.cameraSystem?.setViewDistance(this.settings.cameraFeel.viewDistance);
     this.input.setGamepadSettings(this.settings.gamepad);
     this.world?.applyFxSettings(this.settings);
     this.postProcessing?.applySettings(this.settings);
@@ -509,6 +510,13 @@ export class App {
         water: { ...fresh.water, ...(parsed.water ?? {}) },
         lensDirt: { ...fresh.lensDirt, ...(parsed.lensDirt ?? {}) },
       };
+      // Saved FX used the previous movement defaults; keep a hand-tuned value.
+      if (Math.abs(merged.movement.walkSpeed - 4.8) < 0.001) {
+        merged.movement.walkSpeed = fresh.movement.walkSpeed;
+      }
+      if (Math.abs(merged.movement.jumpForce - 7.15) < 0.001) {
+        merged.movement.jumpForce = fresh.movement.jumpForce;
+      }
       const m = Number(merged.audio.musicVolume);
       const f = Number(merged.audio.fxVolume);
       if (!Number.isFinite(m)) {

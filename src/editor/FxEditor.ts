@@ -32,6 +32,7 @@ type SliderConfig = {
     | 'cameraFeel.headBobAmount'
     | 'cameraFeel.normalFov'
     | 'cameraFeel.fastFov'
+    | 'cameraFeel.viewDistance'
     | 'audio.musicVolume'
     | 'audio.fxVolume'
     | 'water.reflectionStrength'
@@ -201,7 +202,13 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
     title: 'Surface',
     fields: [
       { key: 'fresnel.strength', label: 'Fresnel Strength', min: 0, max: 0.6, step: 0.01 },
-      { key: 'fresnel.radius', label: 'Fresnel Radius', min: 0.05, max: 1, step: 0.01 },
+      {
+        key: 'fresnel.radius',
+        label: 'Fresnel radius (lower = tighter edge)',
+        min: 0,
+        max: 1,
+        step: 0.01,
+      },
     ],
   },
   {
@@ -383,6 +390,14 @@ const sliderGroups: { title: string; fields: SliderConfig[] }[] = [
         min: 65,
         max: 130,
         step: 1,
+        format: (value) => value.toFixed(0),
+      },
+      {
+        key: 'cameraFeel.viewDistance',
+        label: 'View Distance',
+        min: 800,
+        max: 8000,
+        step: 50,
         format: (value) => value.toFixed(0),
       },
     ],

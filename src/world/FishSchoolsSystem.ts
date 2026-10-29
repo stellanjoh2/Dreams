@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinnedHierarchy } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { SEA_BED_SURFACE_Y, WATER_SURFACE_Y } from '../config/defaults';
 import { publicUrl } from '../config/publicUrl';
+import { BLOCK_UNIT } from './TerrainLayout';
 
 /**
  * Reef fish pack (`school_of_fish.glb`): one scene with several species (e.g. clownfish, blue tang,
@@ -14,11 +15,13 @@ const MODEL_URL = publicUrl('assets/school_of_fish.glb');
 
 /**
  * School anchor Y: between {@link SEA_BED_SURFACE_Y} (clearance above sand) and the surface.
+ * `0.25 * BLOCK_UNIT` deeper so skinned swim clips stay under the meniscus.
  */
+const SWIM_DEPTH_DEEPER = 0.25 * BLOCK_UNIT;
 const SWIM_DEPTH_Y = THREE.MathUtils.clamp(
-  SEA_BED_SURFACE_Y + 0.95,
-  SEA_BED_SURFACE_Y + 0.72,
-  WATER_SURFACE_Y - 0.88,
+  SEA_BED_SURFACE_Y + 0.95 - SWIM_DEPTH_DEEPER,
+  SEA_BED_SURFACE_Y + 0.72 - SWIM_DEPTH_DEEPER,
+  WATER_SURFACE_Y - 0.88 - SWIM_DEPTH_DEEPER,
 );
 
 /** Target max dimension per school after normalization (meters-ish world units). */

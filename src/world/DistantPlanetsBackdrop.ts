@@ -187,11 +187,10 @@ function tunePlanetMaterials(object: THREE.Object3D): void {
         mat.emissiveIntensity = 0;
         mat.metalness *= 0.85;
         mat.roughness = THREE.MathUtils.clamp(mat.roughness * 0.92, 0.12, 1);
-      } else if (
-        mat instanceof THREE.MeshLambertMaterial ||
-        mat instanceof THREE.MeshPhongMaterial ||
-        mat instanceof THREE.MeshToonMaterial
-      ) {
+      } else if (mat instanceof THREE.MeshLambertMaterial || mat instanceof THREE.MeshPhongMaterial) {
+        mat.flatShading = false;
+        mat.emissive.set(0, 0, 0);
+      } else if (mat instanceof THREE.MeshToonMaterial) {
         mat.emissive.set(0, 0, 0);
       }
       mat.needsUpdate = true;

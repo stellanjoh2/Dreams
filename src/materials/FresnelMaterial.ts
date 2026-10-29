@@ -1,5 +1,11 @@
 import * as THREE from 'three';
 
+/**
+ * When `false`, no shader patch and no WebGPU fallback — fresnel does not render or add fragment work.
+ * All helpers below stay in the project; set to `true` to turn the rim back on.
+ */
+export const ENABLE_CANDY_FRESNEL = false;
+
 type FresnelCapableMaterial = THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial;
 
 const FRESNEL_PROGRAM_KEY = 'candylands-fresnel-v1';
@@ -24,6 +30,9 @@ export const isFresnelCapableMaterial = (
   material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial;
 
 const ensureFresnelMaterial = (material: FresnelCapableMaterial): void => {
+  if (!ENABLE_CANDY_FRESNEL) {
+    return;
+  }
   if (material.userData.hasCandyFresnel === true) {
     return;
   }
@@ -33,8 +42,8 @@ const ensureFresnelMaterial = (material: FresnelCapableMaterial): void => {
 
   material.userData.hasCandyFresnel = true;
   material.userData.fresnelColor = new THREE.Color('#ffe6a8');
-  material.userData.fresnelStrength = 0.14;
-  material.userData.fresnelRadius = 0.45;
+  material.userData.fresnelStrength = 0.16;
+  material.userData.fresnelRadius = 0.28;
   material.userData.fresnelFallbackState = {
     baseEmissive: material.emissive.clone(),
     baseEmissiveIntensity: material.emissiveIntensity,
@@ -57,7 +66,7 @@ const ensureFresnelMaterial = (material: FresnelCapableMaterial): void => {
       value: Number(material.userData.fresnelStrength ?? 0),
     };
     uniforms.fresnelRadius = {
-      value: Number(material.userData.fresnelRadius ?? 0.45),
+      value: Number(material.userData.fresnelRadius ?? 0.28),
     };
 
     shader.fragmentShader = shader.fragmentShader.replace(
@@ -70,16 +79,40 @@ uniform float fresnelRadius;`,
 
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <dithering_fragment>',
-      `float candyFresnelExponent = mix( 5.0, 1.25, clamp( fresnelRadius, 0.0, 1.0 ) );
+      `float candyFresnelT = clamp( fresnelRadius, 0.0, 1.0 );
+/* Higher exponent = rim hugs the silhouette (Google-style thin edge); lower = soft wide glow. */
+float candyFresnelExponent = mix( 32.0, 1.12, candyFresnelT );
 float candyFresnel = pow( 1.0 - saturate( dot( normalize( normal ), normalize( vViewPosition ) ) ), candyFresnelExponent );
 outgoingLight += fresnelColor * candyFresnel * fresnelStrength;
 #include <dithering_fragment>`,
     );
 
     material.userData.fresnelUniforms = uniforms;
+    resetFresnelFallbackVisuals(material);
   };
 
   material.needsUpdate = true;
+};
+
+/** Strip editor/WebGPU approximation once the real rim shader is active (avoids stacked “fat” edges). */
+const resetFresnelFallbackVisuals = (material: FresnelCapableMaterial): void => {
+  const fallback = material.userData.fresnelFallbackState as FresnelFallbackState | undefined;
+  if (!fallback) {
+    return;
+  }
+  material.emissive.copy(fallback.baseEmissive);
+  material.emissiveIntensity = fallback.baseEmissiveIntensity;
+  if (typeof fallback.baseEnvMapIntensity === 'number' && 'envMapIntensity' in material) {
+    material.envMapIntensity = fallback.baseEnvMapIntensity;
+  }
+  if (
+    material instanceof THREE.MeshPhysicalMaterial &&
+    typeof fallback.baseClearcoat === 'number' &&
+    typeof fallback.baseClearcoatRoughness === 'number'
+  ) {
+    material.clearcoat = fallback.baseClearcoat;
+    material.clearcoatRoughness = fallback.baseClearcoatRoughness;
+  }
 };
 
 const applyFresnelFallback = (
@@ -94,14 +127,19 @@ const applyFresnelFallback = (
   }
 
   const tint = new THREE.Color(color);
-  const emissiveBoost = tint.multiplyScalar(strength * 0.3);
+  /**
+   * WebGPU uses this path (built-in materials map to NodeMaterial; our GLSL rim is WebGL-only).
+   * Favor clearcoat over emissive — clearcoat reads near silhouettes; emissive floods the whole surface.
+   */
+  const emissiveBoost = tint.multiplyScalar(strength * 0.06);
 
   material.emissive.copy(fallback.baseEmissive).add(emissiveBoost);
-  material.emissiveIntensity = fallback.baseEmissiveIntensity + strength * THREE.MathUtils.lerp(0.45, 1.15, radius);
+  material.emissiveIntensity =
+    fallback.baseEmissiveIntensity + strength * THREE.MathUtils.lerp(0.12, 0.38, radius);
 
   if (typeof fallback.baseEnvMapIntensity === 'number') {
     material.envMapIntensity =
-      fallback.baseEnvMapIntensity + strength * THREE.MathUtils.lerp(0.18, 0.7, radius);
+      fallback.baseEnvMapIntensity + strength * THREE.MathUtils.lerp(0.08, 0.32, radius);
   }
 
   if (
@@ -110,12 +148,12 @@ const applyFresnelFallback = (
     typeof fallback.baseClearcoatRoughness === 'number'
   ) {
     material.clearcoat = THREE.MathUtils.clamp(
-      fallback.baseClearcoat + strength * THREE.MathUtils.lerp(0.08, 0.32, radius),
+      fallback.baseClearcoat + strength * THREE.MathUtils.lerp(0.07, 0.24, radius),
       0,
       1,
     );
     material.clearcoatRoughness = THREE.MathUtils.clamp(
-      fallback.baseClearcoatRoughness * THREE.MathUtils.lerp(1.08, 0.72, radius),
+      fallback.baseClearcoatRoughness * THREE.MathUtils.lerp(1.02, 0.78, radius),
       0,
       1,
     );
@@ -131,6 +169,9 @@ export const updateFresnelMaterial = (
   if (!isFresnelCapableMaterial(material)) {
     return;
   }
+  if (!ENABLE_CANDY_FRESNEL) {
+    return;
+  }
 
   ensureFresnelMaterial(material);
 
@@ -144,9 +185,9 @@ export const updateFresnelMaterial = (
     uniforms.fresnelColor.value.copy(fresnelColor);
     uniforms.fresnelStrength.value = strength;
     uniforms.fresnelRadius.value = radius;
+    return;
   }
 
-  // WebGPU does not support onBeforeCompile shader patching for built-in materials,
-  // so apply a visible fallback tint/boost that still responds to the editor.
+  // WebGPU (no `onBeforeCompile`): approximate rim with emissive/clearcoat — keep subtle (see applyFresnelFallback).
   applyFresnelFallback(material, color, strength, radius);
 };

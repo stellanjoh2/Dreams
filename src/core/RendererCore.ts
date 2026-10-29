@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { WebGPURenderer } from 'three/webgpu';
 
+/** GPU framebuffer cap. The canvas still fills the window; pixels above this are not shaded. */
+const MAX_RENDER_WIDTH = 1920;
+const MAX_RENDER_HEIGHT = 1080;
+
 export class RendererCore {
   readonly canvas: HTMLCanvasElement;
   readonly renderer: WebGPURenderer;
@@ -19,7 +23,7 @@ export class RendererCore {
 
     this.renderer = new WebGPURenderer({
       canvas: this.canvas,
-      antialias: true,
+      antialias: false,
       alpha: false,
       powerPreference: 'high-performance',
     });
@@ -64,7 +68,13 @@ export class RendererCore {
       1,
       Math.floor(viewport?.height || window.innerHeight || document.documentElement.clientHeight || 1),
     );
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    // Logical size stays the window (camera aspect, lens flare). Pixel ratio
+    // shrinks so the drawing buffer fits inside 1920×1080, keeping aspect.
+    const pixelRatio = Math.min(
+      window.devicePixelRatio || 1,
+      MAX_RENDER_WIDTH / width,
+      MAX_RENDER_HEIGHT / height,
+    );
     const changed =
       width !== this.width || height !== this.height || Math.abs(pixelRatio - this.pixelRatio) > 0.001;
 
